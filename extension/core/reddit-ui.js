@@ -88,49 +88,41 @@ export async function collectTimeline(timeline, options = {}) {
     onMessage,
   } = options;
   const byKey = new Map();
-  let unchanged = 0;
-  let reachedStart = false;
-
-  for (let step = 0; step <= maxScrollSteps; step += 1) {
-    throwIfAborted(signal);
-    const snapshotOccurrences = new Map();
-    // Reddit renders a header only for the first event in a consecutive run.
-    // Inherit within this one visible snapshot, never across a scroll, so an
-    // off-screen date boundary or unloaded header cannot be guessed.
-    let senderFromPriorEvent;
+  const initialTop = Number(timeline.scrollTop ?? 0);
+  const collectSnapshot = async () => {
+    const snapshotOccurrences = new Map(); let senderFromPriorEvent;
     for (const node of findMessageNodes(timeline)) {
-      const message = extractMessage(node);
-      if (!message) continue;
+      const message = extractMessage(node); if (!message) continue;
       if (isReliableSender(message.sender)) senderFromPriorEvent = message.sender;
       else if (senderFromPriorEvent) message.sender = senderFromPriorEvent;
-      // Keep the element only transiently so reply controls can be opened. The
-      // exporter deliberately omits this property from its serialised output.
       if (!message.node) message.node = node;
-      // Some rendered items do not expose an event id. Pair a stable visible
-      // signature with its occurrence in *this* snapshot: repeated rerenders
-      // dedupe, while duplicate visible messages remain distinct.
-      const signature = stableVisibleSignature(message);
-      const occurrence = snapshotOccurrences.get(signature) ?? 0;
+      const signature = stableVisibleSignature(message); const occurrence = snapshotOccurrences.get(signature) ?? 0;
       snapshotOccurrences.set(signature, occurrence + 1);
       const key = message.eventId || `${signature}\u0000${occurrence}`;
-      if (!byKey.has(key)) {
-        byKey.set(key, message);
-        // Do this before scrolling again: virtualized chat UIs often remove
-        // the parent and its reply control as soon as it leaves the viewport.
-        await onMessage?.(message, node);
-      }
+      if (!byKey.has(key)) { byKey.set(key, message); await onMessage?.(message, node); }
     }
-    if (step === maxScrollSteps) break;
-    const before = byKey.size;
-    const priorTop = Number(timeline.scrollTop ?? 0);
-    if (priorTop <= 0) { reachedStart = true; break; }
-    timeline.scrollTop = Math.max(0, priorTop - Math.max(Number(timeline.clientHeight ?? 0), 600));
-    await settle();
-    if (byKey.size === before && Number(timeline.scrollTop ?? 0) === priorTop) unchanged += 1;
-    else unchanged = 0;
-    if (unchanged >= 2) break;
-  }
-  return { messages: [...byKey.values()], complete: reachedStart, reason: reachedStart ? undefined : 'Timeline may not include all older messages.' };
+  };
+  const sweep = async (direction) => {
+    let unchanged = 0; let reached = false;
+    for (let step = 0; step <= maxScrollSteps; step += 1) {
+      throwIfAborted(signal); await collectSnapshot();
+      if (step === maxScrollSteps) break;
+      const before = byKey.size; const priorTop = Number(timeline.scrollTop ?? 0);
+      const delta = Math.max(Number(timeline.clientHeight ?? 0), 600);
+      const nextTop = direction < 0 ? Math.max(0, priorTop - delta) : Math.min(Number(timeline.scrollHeight ?? priorTop), priorTop + delta);
+      if ((direction < 0 && priorTop <= 0) || (direction > 0 && nextTop === priorTop)) { reached = true; break; }
+      timeline.scrollTop = nextTop; await settle();
+      if (byKey.size === before && Number(timeline.scrollTop ?? 0) === priorTop) unchanged += 1; else unchanged = 0;
+      if (unchanged >= 2) break;
+    }
+    return reached;
+  };
+
+  const reachedStart = await sweep(-1);
+  timeline.scrollTop = initialTop; await settle();
+  const reachedEnd = await sweep(1);
+  const complete = reachedStart && reachedEnd;
+  return { messages: [...byKey.values()], complete, reason: complete ? undefined : 'Timeline may not include all older or newer messages.' };
 }
 
 /**

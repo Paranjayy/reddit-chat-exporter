@@ -1,12 +1,16 @@
 /* global chrome */
 
 const MENU_ROOT = 'private-reddit-chat-export';
+let installingMenus = false;
 
 function installMenus() {
+  if (installingMenus) return;
+  installingMenus = true;
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({ id: MENU_ROOT, title: 'Export current Reddit chat', contexts: ['page'], documentUrlPatterns: ['https://www.reddit.com/chat/*'] });
     chrome.contextMenus.create({ id: `${MENU_ROOT}-json`, parentId: MENU_ROOT, title: 'As JSON', contexts: ['page'], documentUrlPatterns: ['https://www.reddit.com/chat/*'] });
     chrome.contextMenus.create({ id: `${MENU_ROOT}-markdown`, parentId: MENU_ROOT, title: 'As Markdown', contexts: ['page'], documentUrlPatterns: ['https://www.reddit.com/chat/*'] });
+    installingMenus = false;
   });
 }
 

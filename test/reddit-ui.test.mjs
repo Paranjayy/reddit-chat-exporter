@@ -183,6 +183,6 @@ test('marks a successfully opened but stalled thread incomplete on its parent', 
   const root = new FakeNode(); button.onClick = () => { root.threadOpen = true; };
   const result = await collectChatWithThreads(root, { mainTimeline: main, findActiveThreadTimeline: () => root.threadOpen ? thread : null, maxScrollSteps: 0, settle: async () => {}, extractMessage: (node) => ({ eventId: node.getAttribute('data-event-id'), text: node.textContent }) });
   assert.equal(result.messages[0].threadIncomplete, true);
-  assert.equal(result.messages[0].threadIncompleteReason, 'Timeline may not include all older messages.');
-  assert.match(result.warnings.join(' '), /reply thread may not include all older/i);
+  assert.equal(result.messages[0].threadIncompleteReason, 'Timeline may not include all older or newer messages.');
+  assert.match(result.warnings.join(' '), /older or newer/i);
 });
