@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Private chat export</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">LOCAL BACKUP</p>
+      <h1>Take this chat with you.</h1>
+      <p class="lede">Only the chat open in this tab is read. Nothing is sent anywhere.</p>
+
+      <form id="export-form">
+        <fieldset>
+          <legend>Names in your export <span>optional</span></legend>
+          <p class="hint">Preview is optional. Visible Reddit handles are shown only to help you choose private labels; they never enter the export.</p>
+          <div id="participant-labels" aria-live="polite"><p class="empty-labels">Optional: preview visible handles, then choose the private names used in this export.</p></div>
+        </fieldset>
+
+        <fieldset class="format">
+          <legend>File format</legend>
+          <label><input type="radio" name="format" value="json" checked> JSON <small>portable backup</small></label>
+          <label><input type="radio" name="format" value="markdown"> Markdown <small>easy to read</small></label>
+        </fieldset>
+
+        <label class="dedupe"><input type="checkbox" name="dedupeExact"> Skip exact duplicates <small>optional; only identical messages at the same thread level</small></label>
+
+        <div class="actions">
+          <button type="button" class="secondary" id="preview-button">Preview participants</button>
+          <button type="submit" id="export-button">Export current chat <span aria-hidden="true">↓</span></button>
+        </div>
+        <button type="button" class="secondary" id="bulk-export-button">Export loaded chats</button>
+        <p class="hint">Exports up to 20 chats currently visible in Reddit’s sidebar as separate private files. Names chosen above are not reused.</p>
+      </form>
+      <p id="status" role="status" aria-live="polite"></p>
+      <button type="button" class="secondary diagnostic-button" id="copy-diagnostics-button" hidden>Copy safe diagnostics</button>
+      <p class="footnote">Labels exist only for this export and are never saved or sent anywhere. Reply threads are included when Reddit has loaded them.</p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

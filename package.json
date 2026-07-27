@@ -1,0 +1,9 @@
+{
+  "name": "reddit-chat-exporter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "build:console": "node scripts/build-console.mjs"
+  }
+}

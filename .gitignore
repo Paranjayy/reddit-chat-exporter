@@ -1,0 +1,12 @@
+# Private exports and captures must never become project inputs.
+*.private-chat-export.*
+private-chat-export-*.json
+private-chat-export-*.md
+exports/
+captures/
+attachments/
+downloads/
+
+# Browser and local development debris.
+.DS_Store
+node_modules/
