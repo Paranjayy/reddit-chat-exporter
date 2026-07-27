@@ -37,6 +37,7 @@ async function bulkExportLoadedChats({ tabId, format = 'json', dedupeExact = fal
   if (!rooms.length) throw new Error('No loaded chat rooms were found in the sidebar.');
 
   const totals = { attempted: 0, completed: 0, skipped: 0, messages: 0 };
+  const roomsIndex = [];
   try {
     for (const [index, room] of rooms.entries()) {
       totals.attempted += 1;
@@ -50,13 +51,17 @@ async function bulkExportLoadedChats({ tabId, format = 'json', dedupeExact = fal
         }, 20_000);
         totals.completed += 1;
         totals.messages += Number(result?.count ?? 0);
+        roomsIndex.push({ roomNumber: index + 1, status: 'exported', stats: result?.stats ?? {} });
       } catch {
         totals.skipped += 1;
+        roomsIndex.push({ roomNumber: index + 1, status: 'skipped', stats: {} });
       }
     }
   } finally {
     await chrome.tabs.update(tabId, { url: originalUrl }).catch(() => {});
   }
+  await waitForTabComplete(tabId, originalUrl, 20_000).catch(() => {});
+  await sendWhenReady(tabId, { type: 'private-reddit-chat-download-index', index: { schemaVersion: '1.0', title: 'Private chat bulk index', exportedAt: new Date().toISOString(), summary: totals, rooms: roomsIndex } }).catch(() => {});
   return totals;
 }
 

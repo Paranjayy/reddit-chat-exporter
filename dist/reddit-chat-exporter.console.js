@@ -302,13 +302,37 @@ function createPrivateExport(input = {}, options = {}) {
   const participants = senderTokens.map((_, index) => ({ id: personId(index), label: personLabel(index) }));
   if (hasUnknownSender(messages)) participants.push({ id: 'person-unknown', label: 'Unknown sender' });
 
-  return {
+  const exportData = {
     schemaVersion: '1.0',
     title: 'Private chat export',
     exportedAt: normaliseTimestamp(options.exportedAt) ?? new Date().toISOString(),
     redaction: { ...DEFAULT_REDACTION },
     participants,
     messages: messages.map(normaliseMessage),
+  };
+  exportData.stats = deriveExportStats(exportData);
+  return exportData;
+}
+
+function deriveExportStats(exportData = {}) {
+  const counts = new Map(); let topLevelMessages = 0; let replies = 0; let attachments = 0; let reactionItems = 0; let reactionTotal = 0; let incompleteThreads = 0;
+  const times = [];
+  const visit = (messages, depth = 0) => (messages ?? []).forEach((message) => {
+    if (depth === 0) topLevelMessages += 1; else replies += 1;
+    counts.set(message.authorId ?? 'person-unknown', (counts.get(message.authorId ?? 'person-unknown') ?? 0) + 1);
+    attachments += message.attachments?.length ?? 0;
+    for (const reaction of message.reactions ?? []) { reactionItems += 1; reactionTotal += Number(reaction.count ?? 0); }
+    if (message.threadIncomplete) incompleteThreads += 1;
+    if (message.timestamp && !Number.isNaN(new Date(message.timestamp).valueOf())) times.push(message.timestamp);
+    visit(message.replies, depth + 1);
+  });
+  visit(exportData.messages);
+  const sortedTimes = [...times].sort();
+  return {
+    topLevelMessages, replies, totalMessages: topLevelMessages + replies,
+    messagesByParticipant: [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([id, count]) => ({ id, count })),
+    attachments, reactionItems, reactionTotal, incompleteThreads,
+    earliestMessageAt: sortedTimes[0] ?? null, latestMessageAt: sortedTimes.at(-1) ?? null,
   };
 }
 
@@ -348,11 +372,12 @@ function removeExactDuplicates(exportData) {
       return [copy];
     });
   };
-  return { exportData: { ...exportData, messages: visit(exportData.messages) }, removed };
+  const next = { ...exportData, messages: visit(exportData.messages) };
+  return { exportData: { ...next, stats: deriveExportStats(next) }, removed };
 }
 
 function toMarkdown(exportData) {
-  const lines = ['# Private chat export', '', `Exported: ${formatMarkdownTimestamp(exportData.exportedAt)}`, ''];
+  const lines = ['# Private chat export', '', `Exported: ${formatMarkdownTimestamp(exportData.exportedAt)}`, '', '## Summary', '', `- Messages: ${exportData.stats?.totalMessages ?? 0} (${exportData.stats?.topLevelMessages ?? 0} top-level, ${exportData.stats?.replies ?? 0} replies)`, `- Attachments: ${exportData.stats?.attachments ?? 0}; reactions: ${exportData.stats?.reactionTotal ?? 0}`, `- Thread warnings: ${exportData.stats?.incompleteThreads ?? 0}`, `- Range: ${formatMarkdownTimestamp(exportData.stats?.earliestMessageAt)} to ${formatMarkdownTimestamp(exportData.stats?.latestMessageAt)}`, ''];
   const names = new Map((exportData.participants ?? []).map((person) => [person.id, person.label]));
 
   for (const message of exportData.messages ?? []) renderMessage(message, 2, names, lines);

@@ -9,11 +9,12 @@ const core = Promise.all([
 ]);
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-  if (!['private-reddit-chat-preview', 'private-reddit-chat-export', 'private-reddit-chat-list-rooms'].includes(request?.type)) return undefined;
+  if (!['private-reddit-chat-preview', 'private-reddit-chat-export', 'private-reddit-chat-list-rooms', 'private-reddit-chat-download-index'].includes(request?.type)) return undefined;
 
   const operation = request.type === 'private-reddit-chat-preview' ? previewCurrentChat()
     : request.type === 'private-reddit-chat-list-rooms' ? listLoadedRooms()
-      : exportCurrentChat(request);
+      : request.type === 'private-reddit-chat-download-index' ? downloadBulkIndex(request.index)
+        : exportCurrentChat(request);
   operation
     .then((result) => sendResponse({ ok: true, ...result }))
     .catch((error) => sendResponse({ ok: false, error: friendlyError(error) }));
@@ -36,9 +37,16 @@ async function exportCurrentChat({ format = 'json', labels = {}, dedupeExact = f
   downloadLocally(body, filename, format === 'markdown' ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8');
   return {
     count: exportData.messages.length,
+    stats: exportData.stats,
     warnings: collected.warnings ?? [],
     diagnostics: { ...(collected.diagnostics ?? {}), exactDuplicatesRemoved: dedupe.removed },
   };
+}
+
+async function downloadBulkIndex(index) {
+  const [{ toCanonicalJson, createDownloadFilename }] = await core;
+  downloadLocally(toCanonicalJson(index), createDownloadFilename('json', new Date(), 'bulk-index'), 'application/json;charset=utf-8');
+  return { count: index?.rooms?.length ?? 0 };
 }
 
 async function listLoadedRooms() {

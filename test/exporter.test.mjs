@@ -5,6 +5,7 @@ import {
   createPrivateExport,
   createDownloadFilename,
   createLocalParticipantPreview,
+  deriveExportStats,
   removeExactDuplicates,
   toCanonicalJson,
   toMarkdown,
@@ -86,6 +87,13 @@ test('offers a raw handle only in local preview, never in an export', () => {
   const messages = [{ sender: 'visible-handle', text: 'hello' }];
   assert.deepEqual(createLocalParticipantPreview(messages), [{ id: 'person-a', handle: 'visible-handle', fallbackLabel: 'Person A' }]);
   assert.doesNotMatch(toCanonicalJson(createPrivateExport({ messages })), /visible-handle/);
+});
+
+test('derives zero-safe granular stats from sanitized export messages', () => {
+  const stats = deriveExportStats(createPrivateExport({ messages: [{ sender: 'a', timestamp: '2026-01-01T00:00:00+05:30', text: 'x', reactions: [{ emoji: '👍', count: 2 }], attachments: [{ type: 'image' }], replies: [{ sender: 'b', timestamp: '2026-01-02T00:00:00+05:30', text: 'y' }] }] }));
+  assert.deepEqual(stats.messagesByParticipant.map((item) => item.count), [1, 1]);
+  assert.equal(stats.totalMessages, 2); assert.equal(stats.replies, 1); assert.equal(stats.attachments, 1); assert.equal(stats.reactionTotal, 2);
+  assert.deepEqual(deriveExportStats({ messages: [] }).messagesByParticipant, []);
 });
 
 test('does not retain account names, source URLs, room IDs, or raw event IDs', () => {
