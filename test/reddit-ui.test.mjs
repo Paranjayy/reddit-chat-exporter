@@ -51,7 +51,7 @@ test('walks a virtualized timeline upward, dedupes event ids, and reports comple
   const a = new FakeNode({ attrs: { 'data-event-id': 'a' }, text: 'first' });
   const b = new FakeNode({ attrs: { 'data-event-id': 'b' }, text: 'second' });
   const timeline = new FakeNode({ selectors: { '[data-event-id], [data-message-id], [data-testid*="message"], [role="listitem"], article': [b] } });
-  timeline.scrollTop = 100;
+  timeline.scrollTop = 100; timeline.scrollHeight = 700;
   const result = await collectTimeline(timeline, { settle: async () => { timeline.selectors['[data-event-id], [data-message-id], [data-testid*="message"], [role="listitem"], article'] = [a, b]; }, extractMessage: (node) => ({ eventId: node.getAttribute('data-event-id'), text: node.textContent }) });
   assert.deepEqual(result.messages.map((m) => m.eventId).sort(), ['a', 'b']);
   assert.equal(result.complete, true);

@@ -82,14 +82,15 @@ async function waitForActiveThreadTimeline(root, findThread, settle, timeoutMs =
 export async function collectTimeline(timeline, options = {}) {
   const {
     signal,
-    maxScrollSteps = 160,
+    maxScrollSteps = 320,
     settle = defaultSettle,
     extractMessage = extractRenderedMessage,
     onMessage,
     scanBothDirections = true,
   } = options;
   const byKey = new Map();
-  const initialTop = Number(timeline.scrollTop ?? 0);
+  const scrollSurface = findScrollSurface(timeline);
+  const initialTop = Number(scrollSurface.scrollTop ?? 0);
   const collectSnapshot = async () => {
     const snapshotOccurrences = new Map(); let senderFromPriorEvent;
     for (const node of findMessageNodes(timeline)) {
@@ -108,21 +109,31 @@ export async function collectTimeline(timeline, options = {}) {
     for (let step = 0; step <= maxScrollSteps; step += 1) {
       throwIfAborted(signal); await collectSnapshot();
       if (step === maxScrollSteps) break;
-      const before = byKey.size; const priorTop = Number(timeline.scrollTop ?? 0);
-      const delta = Math.max(Number(timeline.clientHeight ?? 0), 600);
-      const nextTop = direction < 0 ? Math.max(0, priorTop - delta) : Math.min(Number(timeline.scrollHeight ?? priorTop), priorTop + delta);
-      if ((direction < 0 && priorTop <= 0) || (direction > 0 && nextTop === priorTop)) { reached = true; break; }
-      timeline.scrollTop = nextTop; await settle();
-      if (byKey.size === before && Number(timeline.scrollTop ?? 0) === priorTop) unchanged += 1; else unchanged = 0;
+      const before = byKey.size; const priorTop = Number(scrollSurface.scrollTop ?? 0);
+      const delta = Math.max(Number(scrollSurface.clientHeight ?? 0), 600);
+      const height = Number(scrollSurface.scrollHeight ?? 0);
+      const hasMeasuredEnd = height > Number(scrollSurface.clientHeight ?? 0);
+      const nextTop = direction < 0 ? Math.max(0, priorTop - delta) : hasMeasuredEnd ? Math.min(height, priorTop + delta) : priorTop;
+      if ((direction < 0 && priorTop <= 0) || (direction > 0 && hasMeasuredEnd && nextTop === priorTop)) { reached = true; break; }
+      // A non-scrollable surface already at zero has no evidence of newer
+      // content. For any nonzero position, refuse a false completion.
+      if (direction > 0 && !hasMeasuredEnd) { reached = priorTop <= 0; break; }
+      scrollSurface.scrollTop = nextTop; await settle();
+      if (byKey.size === before && Number(scrollSurface.scrollTop ?? 0) === priorTop) unchanged += 1; else unchanged = 0;
       if (unchanged >= 2) break;
     }
     return reached;
   };
 
   const reachedStart = await sweep(-1);
-  const reachedEnd = scanBothDirections ? (timeline.scrollTop = initialTop, await settle(), await sweep(1)) : true;
+  const reachedEnd = scanBothDirections ? (scrollSurface.scrollTop = initialTop, await settle(), await sweep(1)) : true;
   const complete = reachedStart && reachedEnd;
   return { messages: [...byKey.values()], complete, reason: complete ? undefined : 'Timeline may not include all older or newer messages.' };
+}
+
+function findScrollSurface(timeline) {
+  const candidates = [timeline, ...queryAllDeep(timeline, 'rs-virtual-scroll-dynamic, [data-testid*="virtual-scroll"], [role="log"], [role="feed"]')];
+  return candidates.find((node) => Number(node?.scrollHeight ?? 0) > Number(node?.clientHeight ?? 0) || Number(node?.scrollTop ?? 0) > 0) ?? timeline;
 }
 
 /**
@@ -250,4 +261,4 @@ function markThreadIncomplete(message, reason, warnings) {
 }
 function unique(values) { return [...new Set(values)]; }
 function throwIfAborted(signal) { if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError'); }
-function defaultSettle() { return new Promise((resolve) => setTimeout(resolve, 50)); }
+function defaultSettle() { return new Promise((resolve) => setTimeout(resolve, 175)); }
