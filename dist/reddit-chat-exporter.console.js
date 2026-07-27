@@ -86,10 +86,11 @@ async function waitForActiveThreadTimeline(root, findThread, settle, timeoutMs =
 async function collectTimeline(timeline, options = {}) {
   const {
     signal,
-    maxScrollSteps = 80,
+    maxScrollSteps = 160,
     settle = defaultSettle,
     extractMessage = extractRenderedMessage,
     onMessage,
+    scanBothDirections = true,
   } = options;
   const byKey = new Map();
   const initialTop = Number(timeline.scrollTop ?? 0);
@@ -123,8 +124,7 @@ async function collectTimeline(timeline, options = {}) {
   };
 
   const reachedStart = await sweep(-1);
-  timeline.scrollTop = initialTop; await settle();
-  const reachedEnd = await sweep(1);
+  const reachedEnd = scanBothDirections ? (timeline.scrollTop = initialTop, await settle(), await sweep(1)) : true;
   const complete = reachedStart && reachedEnd;
   return { messages: [...byKey.values()], complete, reason: complete ? undefined : 'Timeline may not include all older or newer messages.' };
 }
@@ -154,7 +154,7 @@ async function collectChatWithThreads(root, options = {}) {
       await (options.settle ?? defaultSettle)();
       const thread = await waitForActiveThreadTimeline(root, options.findActiveThreadTimeline ?? findActiveThreadTimeline, options.settle ?? defaultSettle);
       if (!thread) throw new Error('thread panel unavailable');
-      const collected = await collectTimeline(thread, { ...options, onMessage: undefined });
+      const collected = await collectTimeline(thread, { ...options, onMessage: undefined, scanBothDirections: false });
       message.replies = collected.messages;
       if (!collected.complete) { markThreadIncomplete(message, collected.reason, warnings); diagnostics.replyThreadsIncomplete += 1; }
       else diagnostics.replyThreadsCompleted += 1;
@@ -179,6 +179,7 @@ async function collectChatWithThreads(root, options = {}) {
   });
   if (!primary.complete) warnings.unshift(primary.reason);
   diagnostics.messagesCollected = primary.messages.length;
+  diagnostics.mainTimelineComplete = primary.complete;
   return { messages: primary.messages, warnings: unique(warnings), diagnostics };
 }
 

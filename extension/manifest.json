@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Private Reddit Chat Export",
   "description": "Export the Reddit chat currently open in your tab, locally and with names redacted by default.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "permissions": ["activeTab", "contextMenus"],
   "action": {
     "default_title": "Export current Reddit chat",
