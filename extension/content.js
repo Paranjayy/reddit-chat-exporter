@@ -9,31 +9,44 @@ const core = Promise.all([
 ]);
 const linkedinCore = import(chrome.runtime.getURL('core/linkedin-ui.js'));
 
-if (/^https:\/\/(www\.)?linkedin\.com\//.test(location.href)) installLinkedInExportControl();
+if (/^https:\/\/(www\.)?linkedin\.com\//.test(location.href) && window.top === window) installLinkedInExportControl();
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-  if (!['private-reddit-chat-preview', 'private-reddit-chat-export', 'private-reddit-chat-list-rooms', 'private-reddit-chat-download-index', 'private-social-export'].includes(request?.type)) return undefined;
+  if (!['private-reddit-chat-preview', 'private-reddit-chat-export', 'private-reddit-chat-list-rooms', 'private-reddit-chat-download-index', 'private-social-export', 'private-linkedin-probe'].includes(request?.type)) return undefined;
 
-  const operation = request.type === 'private-social-export' ? exportLinkedInPage(request)
+  const operation = request.type === 'private-linkedin-probe' ? probeLinkedInPage()
+    : request.type === 'private-social-export' ? exportLinkedInPage(request)
     : request.type === 'private-reddit-chat-preview' ? previewCurrentChat()
     : request.type === 'private-reddit-chat-list-rooms' ? listLoadedRooms()
       : request.type === 'private-reddit-chat-download-index' ? downloadBulkIndex(request.index)
         : exportCurrentChat(request);
   operation
     .then((result) => sendResponse({ ok: true, ...result }))
-    .catch((error) => sendResponse({ ok: false, error: friendlyError(error) }));
+    .catch((error) => sendResponse({ ok: false, error: friendlyError(error), diagnostics: error?.diagnostics ?? null }));
   return true;
 });
 
 async function exportLinkedInPage({ format = 'json' } = {}) {
-  const { detectLinkedInMode, expandLinkedInPage, collectLinkedInProfile, collectLinkedInChat } = await linkedinCore;
-  const mode = detectLinkedInMode();
+  const { detectLinkedInMode, expandLinkedInPage, collectLinkedInProfile, collectLinkedInChat, createLinkedInDiagnostics } = await linkedinCore;
+  const mode = detectLinkedInMode(location.href, document);
   if (mode === 'unsupported') throw new Error('Open a LinkedIn profile or chat before exporting.');
-  await expandLinkedInPage(document);
+  const expandedControls = await expandLinkedInPage(document);
   const data = mode === 'linkedin-profile' ? collectLinkedInProfile(document) : collectLinkedInChat(document);
+  const diagnostics = { ...createLinkedInDiagnostics(document, mode, window.top === window), expandedControls };
+  if (mode !== 'linkedin-profile' && !data.messages.length) {
+    const error = new Error('No LinkedIn message frame was readable. Copy safe diagnostics and send those counts to Codex.');
+    error.diagnostics = diagnostics;
+    throw error;
+  }
   const body = format === 'markdown' ? `# LinkedIn export\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`\n` : `${JSON.stringify(data, null, 2)}\n`;
   downloadLocally(body, `linkedin-${mode}-${new Date().toISOString().slice(0, 10)}.${format === 'markdown' ? 'md' : 'json'}`, format === 'markdown' ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8');
-  return { count: data.messages?.length ?? data.sections?.length ?? 0, mode };
+  return { count: data.messages?.length ?? data.sections?.length ?? 0, mode, diagnostics };
+}
+
+async function probeLinkedInPage() {
+  const { detectLinkedInMode, createLinkedInDiagnostics } = await linkedinCore;
+  const mode = detectLinkedInMode(location.href, document);
+  return { mode, diagnostics: createLinkedInDiagnostics(document, mode, window.top === window) };
 }
 
 function installLinkedInExportControl() {
@@ -44,7 +57,11 @@ function installLinkedInExportControl() {
   control.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;border:0;border-radius:999px;padding:10px 14px;background:#0a66c2;color:white;font:600 13px system-ui;box-shadow:0 3px 14px #0004;cursor:pointer';
   control.addEventListener('click', async () => {
     const original = control.textContent; control.disabled = true; control.textContent = 'Exporting…';
-    try { const result = await exportLinkedInPage({ format: 'json' }); control.textContent = `Saved ${result.mode.replace('linkedin-', '')}`; }
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'private-linkedin-coordinated-export', format: 'json' });
+      if (!response?.ok) throw Object.assign(new Error(response?.error ?? 'Export failed'), { diagnostics: response?.diagnostics });
+      control.textContent = `Saved ${response.mode.replace('linkedin-', '')}`;
+    }
     catch (error) { control.textContent = error instanceof Error ? error.message : 'Export failed'; }
     setTimeout(() => { control.disabled = false; control.textContent = original; }, 2500);
   });

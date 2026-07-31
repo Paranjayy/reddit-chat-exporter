@@ -24,7 +24,7 @@ chrome.runtime.onStartup.addListener(installMenus);
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   const linkedInFormat = info.menuItemId === `${LINKEDIN_MENU_ROOT}-json` ? 'json' : info.menuItemId === `${LINKEDIN_MENU_ROOT}-markdown` ? 'markdown' : null;
   if (linkedInFormat && tab?.id) {
-    chrome.tabs.sendMessage(tab.id, { type: 'private-social-export', format: linkedInFormat }).catch(() => {});
+    exportLinkedInAcrossFrames(tab.id, linkedInFormat).catch(() => {});
     return;
   }
   const format = info.menuItemId === `${MENU_ROOT}-json` ? 'json' : info.menuItemId === `${MENU_ROOT}-markdown` ? 'markdown' : null;
@@ -33,12 +33,55 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-  if (request?.type !== 'private-reddit-chat-bulk-export') return undefined;
-  bulkExportLoadedChats(request)
+  if (!['private-reddit-chat-bulk-export', 'private-linkedin-coordinated-export'].includes(request?.type)) return undefined;
+  const operation = request.type === 'private-linkedin-coordinated-export'
+    ? exportLinkedInAcrossFrames(request.tabId ?? _sender.tab?.id, request.format)
+    : bulkExportLoadedChats(request);
+  operation
     .then((result) => sendResponse({ ok: true, ...result }))
-    .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Bulk export could not start.' }));
+    .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Export could not start.', diagnostics: error?.diagnostics ?? null }));
   return true;
 });
+
+async function exportLinkedInAcrossFrames(tabId, format = 'json') {
+  if (!Number.isInteger(tabId)) throw new Error('Open the LinkedIn page you want to export.');
+  let frames = [{ frameId: 0 }];
+  try { frames = await chrome.webNavigation.getAllFrames({ tabId }) || frames; } catch { /* frame 0 fallback */ }
+  const probes = [];
+  for (const frame of frames) {
+    try {
+      const response = await chrome.tabs.sendMessage(tabId, { type: 'private-linkedin-probe' }, { frameId: frame.frameId });
+      if (response?.ok) probes.push({ frameId: frame.frameId, ...response });
+    } catch { /* inaccessible or unsupported frame */ }
+  }
+  const usable = probes.filter((probe) => probe.mode !== 'unsupported');
+  const selected = usable.sort((a, b) => linkedInProbeScore(b) - linkedInProbeScore(a))[0];
+  const aggregate = {
+    framesFound: frames.length,
+    framesResponded: probes.length,
+    readableLinkedInFrames: usable.length,
+    framesWithMessages: usable.filter((probe) => Number(probe.diagnostics?.messagesCollected) > 0).length,
+  };
+  if (!selected) throw diagnosticError('No readable LinkedIn document was found. Reload the page and try again.', aggregate);
+  const response = await chrome.tabs.sendMessage(tabId, { type: 'private-social-export', format }, { frameId: selected.frameId });
+  const diagnostics = { ...aggregate, ...(response?.diagnostics ?? {}) };
+  if (!response?.ok) throw diagnosticError(response?.error ?? 'The selected LinkedIn frame could not be exported.', diagnostics);
+  return { ...response, diagnostics };
+}
+
+function linkedInProbeScore(probe) {
+  const diagnostics = probe.diagnostics ?? {};
+  return Number(diagnostics.messagesCollected ?? 0) * 10_000
+    + Object.entries(diagnostics).filter(([key]) => key.startsWith('candidateFamily')).reduce((sum, [, value]) => sum + Number(value || 0), 0) * 100
+    + Number(diagnostics.sectionsCollected ?? 0) * 10
+    + (diagnostics.isTopFrame ? 1 : 0);
+}
+
+function diagnosticError(message, diagnostics) {
+  const error = new Error(message);
+  error.diagnostics = diagnostics;
+  return error;
+}
 
 async function bulkExportLoadedChats({ tabId, format = 'json', dedupeExact = false }) {
   if (!Number.isInteger(tabId)) throw new Error('Open the Reddit Chat tab you want to export.');

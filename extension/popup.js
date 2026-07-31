@@ -27,15 +27,17 @@ form.addEventListener('submit', async (event) => {
       throw new Error('Open a supported Reddit chat or LinkedIn page, then use this button again.');
     }
     const isLinkedIn = /linkedin\.com\//.test(tab.url);
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      type: isLinkedIn ? 'private-social-export' : 'private-reddit-chat-export',
+    const request = {
+      type: isLinkedIn ? 'private-linkedin-coordinated-export' : 'private-reddit-chat-export',
+      tabId: tab.id,
       format: new FormData(form).get('format'),
       labels,
       dedupeExact: new FormData(form).get('dedupeExact') === 'on',
-    });
-    if (!response?.ok) throw new Error(response?.error ?? 'The chat export did not finish.');
-    latestDiagnostics = response.diagnostics ?? null;
+    };
+    const response = isLinkedIn ? await chrome.runtime.sendMessage(request) : await chrome.tabs.sendMessage(tab.id, request);
+    latestDiagnostics = response?.diagnostics ?? null;
     showDiagnosticsButton();
+    if (!response?.ok) throw new Error(response?.error ?? 'The chat export did not finish.');
     const warning = response.warnings?.[0];
     setStatus(`Downloaded ${response.count} message${response.count === 1 ? '' : 's'}.${warning ? ` ${warning}` : ''}`, warning ? 'warning' : 'success');
   } catch (error) {
@@ -94,7 +96,7 @@ async function previewParticipants() {
 
 async function copyDiagnostics() {
   if (!latestDiagnostics) return;
-  const lines = ['Private Reddit Chat Export diagnostics'];
+  const lines = ['Private Social Export safe diagnostics'];
   for (const [key, value] of Object.entries(latestDiagnostics)) lines.push(`${key}: ${value}`);
   try {
     await navigator.clipboard.writeText(lines.join('\n'));

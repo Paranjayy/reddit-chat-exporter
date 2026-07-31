@@ -2,7 +2,7 @@
 
 ## Goal
 
-Export the Reddit chat open in the current browser tab as a private, portable JSON or Markdown backup. The extension reads only rendered chat data and writes the chosen file through the browser download flow.
+Export supported Reddit and LinkedIn pages as local JSON or Markdown backups. The extension reads only rendered page data and writes the chosen file through the browser download flow.
 
 ## Architecture
 
@@ -10,6 +10,7 @@ Export the Reddit chat open in the current browser tab as a private, portable JS
 - `src/shared/reddit-ui.js` collects the rendered timeline and opens reply threads. It reports count-only diagnostics for incomplete thread loading.
 - `extension/content.js` connects the Reddit page to the shared logic and downloads the result locally.
 - `extension/popup.js` offers export format, opt-in exact deduplication, and per-export participant labels.
+- `extension/core/linkedin-ui.js` expands and collects LinkedIn profiles, full-page chats, and popup chats. LinkedIn messaging is probed across readable frames because Safari may isolate the rendered conversation from the top document.
 - `dist/reddit-chat-exporter.console.js` is the standalone console variant.
 
 ## Privacy model
@@ -21,6 +22,8 @@ Message and export timestamps use the browser’s local RFC 3339 date/time and U
 ## Reliability model
 
 Reddit’s UI is not a stable API. The collector operates on loaded messages, attempts each visible reply thread, and records count-only diagnostics. Exact duplicate removal is explicitly opt-in and only removes structurally identical sanitized messages at the same thread level. Bulk export is intentionally bounded: it visits at most 20 room links already rendered in Reddit’s sidebar, downloads each as a separate neutral-name file, skips failures individually, and restores the initially open chat. It does not fetch, search, or paginate chats.
+
+LinkedIn’s UI is likewise unstable and may render messaging inside an embedded frame. The background worker probes all readable LinkedIn frames using count-only diagnostics, selects the frame with actual message candidates, and then performs one download there. Chat mode refuses to create a misleading empty backup. Safe diagnostics contain only modes, booleans, and DOM counts—never text, names, URLs, or thread identifiers.
 
 ## Release checklist
 
