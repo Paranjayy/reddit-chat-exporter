@@ -1,6 +1,7 @@
 /* global chrome */
 
 const MENU_ROOT = 'private-reddit-chat-export';
+const LINKEDIN_MENU_ROOT = 'private-linkedin-export';
 let installingMenus = false;
 
 function installMenus() {
@@ -10,6 +11,9 @@ function installMenus() {
     chrome.contextMenus.create({ id: MENU_ROOT, title: 'Export current Reddit chat', contexts: ['page'], documentUrlPatterns: ['https://www.reddit.com/chat/*'] });
     chrome.contextMenus.create({ id: `${MENU_ROOT}-json`, parentId: MENU_ROOT, title: 'As JSON', contexts: ['page'], documentUrlPatterns: ['https://www.reddit.com/chat/*'] });
     chrome.contextMenus.create({ id: `${MENU_ROOT}-markdown`, parentId: MENU_ROOT, title: 'As Markdown', contexts: ['page'], documentUrlPatterns: ['https://www.reddit.com/chat/*'] });
+    chrome.contextMenus.create({ id: LINKEDIN_MENU_ROOT, title: 'Export LinkedIn page', contexts: ['page'], documentUrlPatterns: ['https://www.linkedin.com/*'] });
+    chrome.contextMenus.create({ id: `${LINKEDIN_MENU_ROOT}-json`, parentId: LINKEDIN_MENU_ROOT, title: 'Profile or chat as JSON', contexts: ['page'], documentUrlPatterns: ['https://www.linkedin.com/*'] });
+    chrome.contextMenus.create({ id: `${LINKEDIN_MENU_ROOT}-markdown`, parentId: LINKEDIN_MENU_ROOT, title: 'Profile or chat as Markdown', contexts: ['page'], documentUrlPatterns: ['https://www.linkedin.com/*'] });
     installingMenus = false;
   });
 }
@@ -18,6 +22,11 @@ chrome.runtime.onInstalled.addListener(installMenus);
 chrome.runtime.onStartup.addListener(installMenus);
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+  const linkedInFormat = info.menuItemId === `${LINKEDIN_MENU_ROOT}-json` ? 'json' : info.menuItemId === `${LINKEDIN_MENU_ROOT}-markdown` ? 'markdown' : null;
+  if (linkedInFormat && tab?.id) {
+    chrome.tabs.sendMessage(tab.id, { type: 'private-social-export', format: linkedInFormat }).catch(() => {});
+    return;
+  }
   const format = info.menuItemId === `${MENU_ROOT}-json` ? 'json' : info.menuItemId === `${MENU_ROOT}-markdown` ? 'markdown' : null;
   if (!format || !tab?.id) return;
   chrome.tabs.sendMessage(tab.id, { type: 'private-reddit-chat-export', format, labels: {} }).catch(() => {});

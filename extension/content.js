@@ -7,11 +7,13 @@ const core = Promise.all([
   import(chrome.runtime.getURL('core/exporter.js')),
   import(chrome.runtime.getURL('core/reddit-ui.js')),
 ]);
+const linkedinCore = import(chrome.runtime.getURL('core/linkedin-ui.js'));
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-  if (!['private-reddit-chat-preview', 'private-reddit-chat-export', 'private-reddit-chat-list-rooms', 'private-reddit-chat-download-index'].includes(request?.type)) return undefined;
+  if (!['private-reddit-chat-preview', 'private-reddit-chat-export', 'private-reddit-chat-list-rooms', 'private-reddit-chat-download-index', 'private-social-export'].includes(request?.type)) return undefined;
 
-  const operation = request.type === 'private-reddit-chat-preview' ? previewCurrentChat()
+  const operation = request.type === 'private-social-export' ? exportLinkedInPage(request)
+    : request.type === 'private-reddit-chat-preview' ? previewCurrentChat()
     : request.type === 'private-reddit-chat-list-rooms' ? listLoadedRooms()
       : request.type === 'private-reddit-chat-download-index' ? downloadBulkIndex(request.index)
         : exportCurrentChat(request);
@@ -20,6 +22,17 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     .catch((error) => sendResponse({ ok: false, error: friendlyError(error) }));
   return true;
 });
+
+async function exportLinkedInPage({ format = 'json' } = {}) {
+  const { detectLinkedInMode, expandLinkedInPage, collectLinkedInProfile, collectLinkedInChat } = await linkedinCore;
+  const mode = detectLinkedInMode();
+  if (mode === 'unsupported') throw new Error('Open a LinkedIn profile or chat before exporting.');
+  await expandLinkedInPage(document);
+  const data = mode === 'linkedin-profile' ? collectLinkedInProfile(document) : collectLinkedInChat(document);
+  const body = format === 'markdown' ? `# LinkedIn export\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`\n` : `${JSON.stringify(data, null, 2)}\n`;
+  downloadLocally(body, `linkedin-${mode}-${new Date().toISOString().slice(0, 10)}.${format === 'markdown' ? 'md' : 'json'}`, format === 'markdown' ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8');
+  return { count: data.messages?.length ?? data.sections?.length ?? 0, mode };
+}
 
 async function exportCurrentChat({ format = 'json', labels = {}, dedupeExact = false, filenameSuffix = '' } = {}) {
   const [{ createPrivateExport, removeExactDuplicates, toCanonicalJson, toMarkdown, createDownloadFilename }, { collectChatWithThreads }] = await core;

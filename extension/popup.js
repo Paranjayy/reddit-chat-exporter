@@ -21,11 +21,12 @@ form.addEventListener('submit', async (event) => {
   try {
     const labels = readLabels();
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id || !tab.url?.startsWith('https://www.reddit.com/chat/')) {
-      throw new Error('Open the Reddit chat you want to save, then use this button again.');
+    if (!tab?.id || !/^https:\/\/(www\.)?(reddit\.com\/chat\/|linkedin\.com\/)/.test(tab.url)) {
+      throw new Error('Open a supported Reddit chat or LinkedIn page, then use this button again.');
     }
+    const isLinkedIn = /linkedin\.com\//.test(tab.url);
     const response = await chrome.tabs.sendMessage(tab.id, {
-      type: 'private-reddit-chat-export',
+      type: isLinkedIn ? 'private-social-export' : 'private-reddit-chat-export',
       format: new FormData(form).get('format'),
       labels,
       dedupeExact: new FormData(form).get('dedupeExact') === 'on',

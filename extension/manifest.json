@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Private Reddit Chat Export",
-  "description": "Export the Reddit chat currently open in your tab, locally and with names redacted by default.",
-  "version": "0.3.2",
+  "name": "Private Social Export",
+  "description": "Export supported Reddit and LinkedIn pages locally.",
+  "version": "0.4.0",
   "permissions": ["activeTab", "contextMenus"],
   "action": {
     "default_title": "Export current Reddit chat",
@@ -13,15 +13,15 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.reddit.com/chat/*"],
+      "matches": ["https://www.reddit.com/*", "https://www.linkedin.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["core/exporter.js", "core/reddit-ui.js"],
-      "matches": ["https://www.reddit.com/*"]
+      "resources": ["core/exporter.js", "core/reddit-ui.js", "core/linkedin-ui.js"],
+      "matches": ["https://www.reddit.com/*", "https://www.linkedin.com/*"]
     }
   ]
 }
