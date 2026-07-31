@@ -21,6 +21,8 @@ export function collectLinkedInProfile(root = document) {
 }
 
 export function collectLinkedInChat(root = document) {
-  const items = [...root.querySelectorAll('.msg-s-event-listitem, [data-event-urn], [data-testid*="message"]')];
-  return { type: 'linkedin-chat', exportedAt: new Date().toISOString(), messages: items.map((item) => ({ sender: item.querySelector('.msg-s-message-group__name, [data-test-message-author-name]')?.textContent?.trim() || null, timestamp: item.querySelector('time')?.getAttribute('datetime') || item.querySelector('time')?.textContent?.trim() || null, text: item.innerText?.trim() || item.textContent?.trim() || '' })).filter((message) => message.text) };
+  const selectors = '.msg-s-event-listitem, [data-event-urn], [data-testid*="message"], [data-test-id*="message"], [data-urn*="message"], .scaffold-finite-scroll__content > li, [role="main"] [role="listitem"]';
+  const items = [...root.querySelectorAll(selectors)];
+  const messages = items.map((item) => ({ sender: item.querySelector('.msg-s-message-group__name, [data-test-message-author-name], [data-entity-hovercard-id]')?.textContent?.trim() || null, timestamp: item.querySelector('time')?.getAttribute('datetime') || item.querySelector('time')?.textContent?.trim() || null, text: item.innerText?.trim() || item.textContent?.trim() || '' })).filter((message) => message.text && !/^Messaging$/i.test(message.text));
+  return { type: 'linkedin-chat', exportedAt: new Date().toISOString(), messages };
 }
