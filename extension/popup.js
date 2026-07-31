@@ -27,6 +27,7 @@ form.addEventListener('submit', async (event) => {
       throw new Error('Open a supported Reddit chat or LinkedIn page, then use this button again.');
     }
     const isLinkedIn = /linkedin\.com\//.test(tab.url);
+    if (isLinkedIn) setStatus('Slowly loading older LinkedIn messages and collecting attachments…', 'working');
     const request = {
       type: isLinkedIn ? 'private-linkedin-coordinated-export' : 'private-reddit-chat-export',
       tabId: tab.id,

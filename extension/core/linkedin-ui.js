@@ -33,10 +33,78 @@ export function collectLinkedInProfile(root = document) {
 }
 
 export function collectLinkedInChat(root = document) {
-  const items = [...new Set(MESSAGE_SELECTORS.flatMap((selector) => [...root.querySelectorAll(selector)]))]
-    .filter((item) => !itemsContainAnotherCandidate(item));
-  const messages = items.map((item) => ({ sender: item.querySelector('.msg-s-message-group__name, [data-test-message-author-name], [data-entity-hovercard-id]')?.textContent?.trim() || null, timestamp: item.querySelector('time')?.getAttribute('datetime') || item.querySelector('time')?.textContent?.trim() || null, text: item.innerText?.trim() || item.textContent?.trim() || '' })).filter((message) => message.text && !/^Messaging$/i.test(message.text));
+  const messages = collectLinkedInSnapshot(root).map(({ key: _key, ...message }) => message);
   return { type: 'linkedin-chat', exportedAt: new Date().toISOString(), messages };
+}
+
+/** Slowly loads older rendered events and merges every observed DOM snapshot. */
+export async function collectLinkedInChatHistory(root = document, options = {}) {
+  const maxScrollSteps = options.maxScrollSteps ?? 240;
+  const settle = options.settle ?? waitForLinkedInChange;
+  const surface = findLinkedInScrollSurface(root);
+  const messageByKey = new Map();
+  const edges = new Map();
+  const firstSeen = new Map();
+  let seenSequence = 0; let stableAtTop = 0; let scrollSteps = 0; let snapshotsCollected = 0; let historyComplete = false;
+  const initialBottomDistance = surface ? Math.max(0, Number(surface.scrollHeight) - Number(surface.clientHeight) - Number(surface.scrollTop)) : 0;
+
+  const capture = () => {
+    const snapshot = collectLinkedInSnapshot(root);
+    snapshotsCollected += 1;
+    for (const message of snapshot) {
+      if (!firstSeen.has(message.key)) firstSeen.set(message.key, seenSequence++);
+      const prior = messageByKey.get(message.key);
+      messageByKey.set(message.key, richerMessage(prior, message));
+      if (!edges.has(message.key)) edges.set(message.key, new Set());
+    }
+    for (let index = 1; index < snapshot.length; index += 1) edges.get(snapshot[index - 1].key).add(snapshot[index].key);
+    return snapshot.length;
+  };
+
+  capture();
+  if (surface) {
+    for (let step = 0; step < maxScrollSteps; step += 1) {
+      const before = { count: messageByKey.size, height: Number(surface.scrollHeight), top: Number(surface.scrollTop) };
+      const delta = Math.max(Math.floor(Number(surface.clientHeight) * 0.8), 480);
+      surface.scrollTop = Math.max(0, before.top - delta);
+      surface.dispatchEvent?.(new Event('scroll', { bubbles: true }));
+      scrollSteps += 1;
+      await settle(root, surface, before);
+      capture();
+      const atTop = Number(surface.scrollTop) <= 1;
+      const changed = messageByKey.size > before.count || Number(surface.scrollHeight) !== before.height;
+      stableAtTop = atTop && !changed ? stableAtTop + 1 : 0;
+      if (stableAtTop >= 4) { historyComplete = true; break; }
+    }
+    surface.scrollTop = Math.max(0, Number(surface.scrollHeight) - Number(surface.clientHeight) - initialBottomDistance);
+    surface.dispatchEvent?.(new Event('scroll', { bubbles: true }));
+  }
+
+  const orderedKeys = topologicalMessageOrder(messageByKey, edges, firstSeen);
+  const messages = orderedKeys.map((key) => {
+    const { key: _key, ...message } = messageByKey.get(key);
+    return message;
+  });
+  return {
+    data: { type: 'linkedin-chat', exportedAt: new Date().toISOString(), messages },
+    diagnostics: { scrollSurfaceFound: Boolean(surface), scrollSteps, snapshotsCollected, historyComplete, messagesCollected: messages.length },
+  };
+}
+
+export function toLinkedInMarkdown(data) {
+  const exported = readableDate(data.exportedAt);
+  if (data.type === 'linkedin-profile') {
+    const sections = (data.sections ?? []).map((section) => `## ${headingText(section.heading || 'Section')}\n\n${section.text || '_No text captured._'}`).join('\n\n');
+    return `# LinkedIn Profile Export\n\n- Exported: ${exported}\n- Sections: ${(data.sections ?? []).length}\n\n${sections}\n`;
+  }
+  const messages = (data.messages ?? []).map((message) => {
+    const sender = headingText(message.sender || 'Unknown sender');
+    const timestamp = message.timestamp ? ` — ${headingText(readableDate(message.timestamp))}` : '';
+    const body = message.text || '_Attachment-only message._';
+    const attachments = (message.attachments ?? []).map(markdownAttachment).filter(Boolean);
+    return `## ${sender}${timestamp}\n\n${body}${attachments.length ? `\n\n### Attachments\n\n${attachments.join('\n')}` : ''}`;
+  });
+  return `# LinkedIn Chat Export\n\n- Exported: ${exported}\n- Messages: ${(data.messages ?? []).length}\n\n${messages.join('\n\n---\n\n')}\n`;
 }
 
 export function createLinkedInDiagnostics(root = document, mode = detectLinkedInMode(location.href, root), isTopFrame = true) {
@@ -61,4 +129,112 @@ export function createLinkedInDiagnostics(root = document, mode = detectLinkedIn
 
 function itemsContainAnotherCandidate(item) {
   return MESSAGE_SELECTORS.some((selector) => item.querySelector(selector));
+}
+
+function findMessageItems(root) {
+  return [...new Set(MESSAGE_SELECTORS.flatMap((selector) => [...root.querySelectorAll(selector)]))]
+    .filter((item) => !itemsContainAnotherCandidate(item));
+}
+
+function collectLinkedInSnapshot(root) {
+  const occurrences = new Map(); let inheritedSender = null;
+  return findMessageItems(root).map((item) => {
+    const sender = item.querySelector('.msg-s-message-group__name, .msg-s-message-group__profile-link, [data-test-message-author-name], [data-entity-hovercard-id]')?.textContent?.trim() || null;
+    if (sender) inheritedSender = sender;
+    const timestamp = item.querySelector('time')?.getAttribute('datetime') || item.querySelector('time')?.textContent?.trim() || null;
+    const body = item.querySelector('.msg-s-event-listitem__body, .msg-s-event-listitem__message-bubble, [data-testid*="message-body" i], [data-test-id*="message-body" i]');
+    const text = body?.innerText?.trim() || body?.textContent?.trim() || item.innerText?.trim() || item.textContent?.trim() || '';
+    const attachments = collectLinkedInAttachments(item);
+    const signature = `${inheritedSender ?? ''}\u0000${timestamp ?? ''}\u0000${text}\u0000${attachments.map((entry) => entry.url).join('\u0000')}`;
+    const occurrence = occurrences.get(signature) ?? 0;
+    occurrences.set(signature, occurrence + 1);
+    const stableId = item.getAttribute('data-event-urn') || item.getAttribute('data-urn') || item.getAttribute('data-event-id') || item.getAttribute('data-message-id');
+    return { key: stableId || `${signature}\u0000${occurrence}`, sender: inheritedSender, timestamp, text, attachments };
+  }).filter((message) => (message.text || message.attachments.length) && !/^Messaging$/i.test(message.text));
+}
+
+function collectLinkedInAttachments(item) {
+  const results = new Map();
+  const explicitSelector = '.msg-s-event-listitem__attachment, .msg-s-message-list__attachment, .msg-s-event-listitem__media, [data-testid*="attachment" i], [data-test-id*="attachment" i], [aria-label*="attachment" i]';
+  const explicit = [...item.querySelectorAll(explicitSelector)];
+  const candidates = new Set(explicit.flatMap((node) => [node, ...node.querySelectorAll('a[href], img, video, source') ]));
+  for (const media of item.querySelectorAll('img, video, source')) {
+    const width = Number(media.getBoundingClientRect?.().width ?? media.width ?? 0);
+    const height = Number(media.getBoundingClientRect?.().height ?? media.height ?? 0);
+    if ((width >= 96 || height >= 96) && !media.closest?.('a[href*="/in/"]')) candidates.add(media);
+  }
+  for (const link of item.querySelectorAll('a[href]')) {
+    const href = link.getAttribute('href') || '';
+    if (/media\.licdn\.com|\/dms\/|\.(?:pdf|docx?|xlsx?|pptx?|zip)(?:[?#]|$)/i.test(href)) candidates.add(link);
+  }
+  for (const node of candidates) {
+    const source = node.currentSrc || node.getAttribute?.('src') || node.getAttribute?.('href') || srcFromSet(node.getAttribute?.('srcset'));
+    const url = renderedHttpUrl(source);
+    if (!url || results.has(url)) continue;
+    const tag = String(node.tagName || '').toLowerCase();
+    const type = tag === 'img' ? 'image' : tag === 'video' || tag === 'source' ? 'video' : /\.(?:png|jpe?g|gif|webp)(?:[?#]|$)/i.test(url) ? 'image' : 'file';
+    const alt = String(node.getAttribute?.('alt') || node.getAttribute?.('aria-label') || (type === 'image' ? 'LinkedIn image attachment' : 'LinkedIn attachment')).trim();
+    results.set(url, { type, url, alt: alt.slice(0, 240) });
+  }
+  return [...results.values()];
+}
+
+function findLinkedInScrollSurface(root) {
+  const items = findMessageItems(root);
+  const first = items[0];
+  for (let node = first?.parentElement; node; node = node.parentElement) {
+    const containsConversation = findMessageItems(node).length >= Math.min(items.length, 2);
+    let overflow = '';
+    try { overflow = getComputedStyle(node).overflowY; } catch { /* non-browser test root */ }
+    const scrollableOverflow = /auto|scroll|overlay/i.test(overflow) || Number(node.scrollTop) > 0;
+    if (containsConversation && scrollableOverflow && Number(node.scrollHeight) > Number(node.clientHeight) + 8) return node;
+  }
+  return [...root.querySelectorAll('.msg-s-message-list-content, .msg-s-message-list-container, [role="log"]')]
+    .find((node) => Number(node.scrollHeight) > Number(node.clientHeight) + 8) || null;
+}
+
+async function waitForLinkedInChange(root, surface, before) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    if (findMessageItems(root).length !== before.count || Number(surface.scrollHeight) !== before.height || Number(surface.scrollTop) !== before.top) return;
+  }
+}
+
+function richerMessage(prior, next) {
+  if (!prior) return next;
+  return {
+    ...prior,
+    sender: next.sender || prior.sender,
+    timestamp: next.timestamp || prior.timestamp,
+    text: next.text.length >= prior.text.length ? next.text : prior.text,
+    attachments: [...new Map([...(prior.attachments ?? []), ...(next.attachments ?? [])].map((entry) => [entry.url, entry])).values()],
+  };
+}
+
+function topologicalMessageOrder(messageByKey, edges, firstSeen) {
+  const indegree = new Map([...messageByKey.keys()].map((key) => [key, 0]));
+  for (const [from, targets] of edges) for (const target of targets) if (from !== target && indegree.has(target)) indegree.set(target, indegree.get(target) + 1);
+  const ready = [...indegree].filter(([, degree]) => degree === 0).map(([key]) => key).sort((a, b) => firstSeen.get(a) - firstSeen.get(b));
+  const ordered = [];
+  while (ready.length) {
+    const key = ready.shift(); ordered.push(key);
+    for (const target of edges.get(key) ?? []) {
+      indegree.set(target, indegree.get(target) - 1);
+      if (indegree.get(target) === 0) { ready.push(target); ready.sort((a, b) => firstSeen.get(a) - firstSeen.get(b)); }
+    }
+  }
+  for (const key of messageByKey.keys()) if (!ordered.includes(key)) ordered.push(key);
+  return ordered;
+}
+
+function renderedHttpUrl(value) {
+  try { const url = new URL(String(value || ''), location.href); return /^https?:$/.test(url.protocol) ? url.href : null; } catch { return null; }
+}
+function srcFromSet(value) { return String(value || '').split(',').at(-1)?.trim().split(/\s+/)[0] || ''; }
+function headingText(value) { return String(value || '').replace(/[\r\n]+/g, ' ').replace(/#/g, '\\#').trim(); }
+function readableDate(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? String(value || 'Unknown time') : date.toLocaleString(); }
+function markdownAttachment(entry) {
+  if (!/^https?:\/\//i.test(entry?.url || '')) return '';
+  const label = String(entry.alt || 'LinkedIn attachment').replace(/[\[\]\\]/g, '\\$&');
+  return entry.type === 'image' ? `- ![${label}](<${entry.url}>)` : `- [${label}](<${entry.url}>)`;
 }

@@ -12,4 +12,5 @@ test('LinkedIn collector runs in embedded messaging frames', () => {
   assert.ok(linkedinScript, 'LinkedIn must have its own content-script entry');
   assert.equal(linkedinScript.all_frames, true);
   assert.ok(manifest.permissions.includes('webNavigation'));
+  assert.equal(manifest.version, '0.4.3');
 });

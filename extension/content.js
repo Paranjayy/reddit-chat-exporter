@@ -27,20 +27,29 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 });
 
 async function exportLinkedInPage({ format = 'json' } = {}) {
-  const { detectLinkedInMode, expandLinkedInPage, collectLinkedInProfile, collectLinkedInChat, createLinkedInDiagnostics } = await linkedinCore;
+  const { detectLinkedInMode, expandLinkedInPage, collectLinkedInProfile, collectLinkedInChatHistory, createLinkedInDiagnostics, toLinkedInMarkdown } = await linkedinCore;
   const mode = detectLinkedInMode(location.href, document);
   if (mode === 'unsupported') throw new Error('Open a LinkedIn profile or chat before exporting.');
   const expandedControls = await expandLinkedInPage(document);
-  const data = mode === 'linkedin-profile' ? collectLinkedInProfile(document) : collectLinkedInChat(document);
-  const diagnostics = { ...createLinkedInDiagnostics(document, mode, window.top === window), expandedControls };
+  const collected = mode === 'linkedin-profile' ? { data: collectLinkedInProfile(document), diagnostics: {} } : await collectLinkedInChatHistory(document);
+  const data = collected.data;
+  const diagnostics = {
+    ...createLinkedInDiagnostics(document, mode, window.top === window),
+    ...collected.diagnostics,
+    attachmentsCaptured: data.messages?.reduce((sum, message) => sum + (message.attachments?.length ?? 0), 0) ?? 0,
+    expandedControls,
+  };
   if (mode !== 'linkedin-profile' && !data.messages.length) {
     const error = new Error('No LinkedIn message frame was readable. Copy safe diagnostics and send those counts to Codex.');
     error.diagnostics = diagnostics;
     throw error;
   }
-  const body = format === 'markdown' ? `# LinkedIn export\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`\n` : `${JSON.stringify(data, null, 2)}\n`;
+  const body = format === 'markdown' ? toLinkedInMarkdown(data) : `${JSON.stringify(data, null, 2)}\n`;
   downloadLocally(body, `linkedin-${mode}-${new Date().toISOString().slice(0, 10)}.${format === 'markdown' ? 'md' : 'json'}`, format === 'markdown' ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8');
-  return { count: data.messages?.length ?? data.sections?.length ?? 0, mode, diagnostics };
+  const warnings = mode !== 'linkedin-profile' && !diagnostics.historyComplete
+    ? ['LinkedIn stopped changing before the oldest-history boundary could be confirmed; review the first exported message.']
+    : [];
+  return { count: data.messages?.length ?? data.sections?.length ?? 0, mode, diagnostics, warnings };
 }
 
 async function probeLinkedInPage() {
