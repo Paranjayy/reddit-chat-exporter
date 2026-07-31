@@ -132,7 +132,16 @@ async function collectTimeline(timeline, options = {}) {
   const reachedStart = await sweep(-1);
   const reachedEnd = scanBothDirections ? (scrollSurface.scrollTop = initialTop, await settle(), await sweep(1)) : true;
   const complete = reachedStart && reachedEnd;
-  return { messages: [...byKey.values()], complete, reason: complete ? undefined : 'Timeline may not include all older or newer messages.' };
+  const messages = [...byKey.values()].sort(compareMessageChronology);
+  return { messages, complete, reason: complete ? undefined : 'Timeline may not include all older or newer messages.' };
+}
+
+function compareMessageChronology(left, right) {
+  const leftTime = Date.parse(left?.timestamp ?? ''); const rightTime = Date.parse(right?.timestamp ?? '');
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) return leftTime - rightTime;
+  if (Number.isFinite(leftTime) && !Number.isFinite(rightTime)) return -1;
+  if (!Number.isFinite(leftTime) && Number.isFinite(rightTime)) return 1;
+  return 0;
 }
 
 function findScrollSurface(timeline) {
