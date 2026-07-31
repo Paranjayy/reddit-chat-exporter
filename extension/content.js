@@ -9,6 +9,8 @@ const core = Promise.all([
 ]);
 const linkedinCore = import(chrome.runtime.getURL('core/linkedin-ui.js'));
 
+if (/^https:\/\/(www\.)?linkedin\.com\//.test(location.href)) installLinkedInExportControl();
+
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (!['private-reddit-chat-preview', 'private-reddit-chat-export', 'private-reddit-chat-list-rooms', 'private-reddit-chat-download-index', 'private-social-export'].includes(request?.type)) return undefined;
 
@@ -32,6 +34,21 @@ async function exportLinkedInPage({ format = 'json' } = {}) {
   const body = format === 'markdown' ? `# LinkedIn export\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`\n` : `${JSON.stringify(data, null, 2)}\n`;
   downloadLocally(body, `linkedin-${mode}-${new Date().toISOString().slice(0, 10)}.${format === 'markdown' ? 'md' : 'json'}`, format === 'markdown' ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8');
   return { count: data.messages?.length ?? data.sections?.length ?? 0, mode };
+}
+
+function installLinkedInExportControl() {
+  if (document.getElementById('private-social-export-control')) return;
+  const control = document.createElement('button');
+  control.id = 'private-social-export-control'; control.type = 'button';
+  control.textContent = 'Export LinkedIn chat / profile';
+  control.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;border:0;border-radius:999px;padding:10px 14px;background:#0a66c2;color:white;font:600 13px system-ui;box-shadow:0 3px 14px #0004;cursor:pointer';
+  control.addEventListener('click', async () => {
+    const original = control.textContent; control.disabled = true; control.textContent = 'Exporting…';
+    try { const result = await exportLinkedInPage({ format: 'json' }); control.textContent = `Saved ${result.mode.replace('linkedin-', '')}`; }
+    catch (error) { control.textContent = error instanceof Error ? error.message : 'Export failed'; }
+    setTimeout(() => { control.disabled = false; control.textContent = original; }, 2500);
+  });
+  document.documentElement.append(control);
 }
 
 async function exportCurrentChat({ format = 'json', labels = {}, dedupeExact = false, filenameSuffix = '' } = {}) {

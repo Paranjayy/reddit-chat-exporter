@@ -17,5 +17,6 @@
 ## Version control and releases
 
 - Use semantic versions. Bump the extension patch version for fixes and small user-visible changes; use a minor version for new capabilities.
+- Every user-visible extension change must bump `extension/manifest.json`; keep `DESIGN.md` current when a new page mode or privacy rule is added.
 - Before every push, inspect `git status`, `git diff --cached`, and `git log --all -p` for private data. Use a generic no-reply commit identity.
 - The repository stays private unless the owner explicitly changes that decision. Do not force-push, publish, or change repository visibility without explicit approval.

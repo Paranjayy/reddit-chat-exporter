@@ -10,6 +10,8 @@ const bulkExportButton = document.querySelector('#bulk-export-button');
 let discoveredParticipants = [];
 let latestDiagnostics = null;
 
+configurePopup();
+
 previewButton.addEventListener('click', previewParticipants);
 copyDiagnosticsButton.addEventListener('click', copyDiagnostics);
 bulkExportButton.addEventListener('click', bulkExportLoadedChats);
@@ -153,4 +155,15 @@ function setBusy(busy) {
   button.disabled = busy;
   previewButton.disabled = busy;
   bulkExportButton.disabled = busy;
+}
+
+async function configurePopup() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!/linkedin\.com\//.test(tab?.url ?? '')) return;
+  document.querySelector('h1').textContent = 'Export this LinkedIn page.';
+  document.querySelector('.lede').textContent = 'Profile, full chat, or an open messaging popup is read locally. Nothing is sent anywhere.';
+  button.innerHTML = 'Export LinkedIn page <span aria-hidden="true">↓</span>';
+  previewButton.hidden = true;
+  bulkExportButton.hidden = true;
+  document.querySelector('#participant-labels').closest('fieldset').hidden = true;
 }
