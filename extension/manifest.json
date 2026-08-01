@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Private Social Export",
   "description": "Export supported Reddit and LinkedIn pages locally.",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "permissions": ["activeTab", "contextMenus", "webNavigation", "scripting"],
   "action": {
     "default_title": "Export current Reddit chat",
@@ -19,7 +19,7 @@
     },
     {
       "matches": ["https://www.linkedin.com/*"],
-      "js": ["content.js"],
+      "js": ["core/linkedin-ui.classic.js", "content.js"],
       "run_at": "document_idle",
       "all_frames": true,
       "match_about_blank": true

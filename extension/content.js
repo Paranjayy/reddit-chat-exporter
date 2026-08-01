@@ -3,13 +3,16 @@
 // This is deliberately a classic content script: MV3 does not support a
 // `type: module` content_scripts entry.  The two audited shared modules are
 // loaded from this extension package only; this script never fetches anything.
-const core = Promise.all([
+const isLinkedInPage = /^https:\/\/(www\.)?linkedin\.com\//.test(location.href);
+const core = isLinkedInPage ? null : Promise.all([
   import(chrome.runtime.getURL('core/exporter.js')),
   import(chrome.runtime.getURL('core/reddit-ui.js')),
 ]);
-const linkedinCore = import(chrome.runtime.getURL('core/linkedin-ui.js'));
 
-if (/^https:\/\/(www\.)?linkedin\.com\//.test(location.href) && window.top === window) installLinkedInExportControl();
+if (isLinkedInPage) {
+  safeLinkedInLog('content-ready', { coreAvailable: Boolean(globalThis.__PRIVATE_SOCIAL_LINKEDIN_CORE__), isTopFrame: window.top === window });
+  if (window.top === window) installLinkedInExportControl();
+}
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (!['private-reddit-chat-preview', 'private-reddit-chat-export', 'private-reddit-chat-list-rooms', 'private-reddit-chat-download-index', 'private-social-export', 'private-linkedin-probe'].includes(request?.type)) return undefined;
@@ -22,16 +25,25 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         : exportCurrentChat(request);
   operation
     .then((result) => sendResponse({ ok: true, ...result }))
-    .catch((error) => sendResponse({ ok: false, error: friendlyError(error), diagnostics: error?.diagnostics ?? null }));
+    .catch((error) => {
+      const diagnostics = { ...(error?.diagnostics ?? {}), failureStage: error?.failureStage ?? 'operation', failureName: error?.name ?? 'Error' };
+      if (isLinkedInPage) safeLinkedInLog('operation-failed', diagnostics);
+      sendResponse({ ok: false, error: friendlyError(error), diagnostics });
+    });
   return true;
 });
 
 async function exportLinkedInPage({ format = 'json' } = {}) {
-  const { detectLinkedInMode, expandLinkedInPage, collectLinkedInProfile, collectLinkedInChatHistory, createLinkedInDiagnostics, toLinkedInMarkdown } = await linkedinCore;
-  const mode = detectLinkedInMode(location.href, document);
+  const { detectLinkedInMode, expandLinkedInPage, collectLinkedInProfile, collectLinkedInChatHistory, createLinkedInDiagnostics, toLinkedInMarkdown } = requireLinkedInCore();
+  const mode = await atLinkedInStage('mode-detection', () => detectLinkedInMode(location.href, document));
   if (mode === 'unsupported') throw new Error('Open a LinkedIn profile or chat before exporting.');
-  const expandedControls = await expandLinkedInPage(document);
-  const collected = mode === 'linkedin-profile' ? { data: collectLinkedInProfile(document), diagnostics: {} } : await collectLinkedInChatHistory(document);
+  safeLinkedInLog('export-started', { mode, isTopFrame: window.top === window });
+  const expandedControls = await atLinkedInStage('expand-controls', () => expandLinkedInPage(document));
+  const collected = mode === 'linkedin-profile'
+    ? await atLinkedInStage('profile-collection', () => ({ data: collectLinkedInProfile(document), diagnostics: {} }))
+    : await atLinkedInStage('history-crawl', () => collectLinkedInChatHistory(document, {
+      onProgress: (details) => safeLinkedInLog('crawl-progress', details),
+    }));
   const data = collected.data;
   const diagnostics = {
     ...createLinkedInDiagnostics(document, mode, window.top === window),
@@ -44,18 +56,39 @@ async function exportLinkedInPage({ format = 'json' } = {}) {
     error.diagnostics = diagnostics;
     throw error;
   }
-  const body = format === 'markdown' ? toLinkedInMarkdown(data) : `${JSON.stringify(data, null, 2)}\n`;
+  const body = await atLinkedInStage('serialization', () => format === 'markdown' ? toLinkedInMarkdown(data) : `${JSON.stringify(data, null, 2)}\n`);
   downloadLocally(body, `linkedin-${mode}-${new Date().toISOString().slice(0, 10)}.${format === 'markdown' ? 'md' : 'json'}`, format === 'markdown' ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8');
   const warnings = mode !== 'linkedin-profile' && !diagnostics.historyComplete
     ? ['LinkedIn stopped changing before the oldest-history boundary could be confirmed; review the first exported message.']
     : [];
+  safeLinkedInLog('export-complete', { mode, messagesCollected: diagnostics.messagesCollected ?? 0, attachmentsCaptured: diagnostics.attachmentsCaptured, historyComplete: diagnostics.historyComplete ?? false });
   return { count: data.messages?.length ?? data.sections?.length ?? 0, mode, diagnostics, warnings };
 }
 
 async function probeLinkedInPage() {
-  const { detectLinkedInMode, createLinkedInDiagnostics } = await linkedinCore;
-  const mode = detectLinkedInMode(location.href, document);
-  return { mode, diagnostics: createLinkedInDiagnostics(document, mode, window.top === window) };
+  const { detectLinkedInMode, createLinkedInDiagnostics } = requireLinkedInCore();
+  const mode = await atLinkedInStage('probe-mode', () => detectLinkedInMode(location.href, document));
+  const diagnostics = await atLinkedInStage('probe-collection', () => createLinkedInDiagnostics(document, mode, window.top === window));
+  safeLinkedInLog('probe-complete', { mode, isTopFrame: diagnostics.isTopFrame, messagesCollected: diagnostics.messagesCollected });
+  return { mode, diagnostics };
+}
+
+function requireLinkedInCore() {
+  const value = globalThis.__PRIVATE_SOCIAL_LINKEDIN_CORE__;
+  if (value) return value;
+  const error = new Error('The LinkedIn collector did not initialize. Reload the extension and try again.');
+  error.failureStage = 'core-bootstrap';
+  throw error;
+}
+
+async function atLinkedInStage(stage, operation) {
+  try { return await operation(); }
+  catch (error) { if (error && !error.failureStage) error.failureStage = stage; throw error; }
+}
+
+function safeLinkedInLog(event, details = {}) {
+  const allowed = Object.fromEntries(Object.entries(details).filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value)));
+  console.info('[Private Social Export]', event, allowed);
 }
 
 function installLinkedInExportControl() {

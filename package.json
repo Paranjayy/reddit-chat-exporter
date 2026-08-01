@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test",
+    "build:linkedin-core": "node scripts/build-linkedin-classic.mjs",
+    "test": "npm run build:linkedin-core && node --test",
     "build:console": "node scripts/build-console.mjs"
   }
 }

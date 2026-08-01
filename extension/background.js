@@ -51,10 +51,10 @@ async function exportLinkedInAcrossFrames(tabId, format = 'json') {
   // Reloading an unpacked extension invalidates existing content-script
   // listeners but leaves their injected page controls behind in Safari.
   // Reinject once when no frame can answer, then probe the fresh contexts.
-  if (!probed.responses) {
+  if (!probed.probes.length && (!probed.responses || probed.coreBootstrapFailures === probed.initializationErrors)) {
     injectionAttempted = true;
     try {
-      const injected = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['content.js'] });
+      const injected = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['core/linkedin-ui.classic.js', 'content.js'] });
       framesInjected = injected?.length ?? 0;
       await new Promise((resolve) => setTimeout(resolve, 150));
       frames = await linkedInFrames(tabId);
@@ -69,12 +69,16 @@ async function exportLinkedInAcrossFrames(tabId, format = 'json') {
     framesResponded: probed.responses,
     framesProbedSuccessfully: probes.length,
     frameInitializationErrors: probed.initializationErrors,
+    coreBootstrapFailures: probed.coreBootstrapFailures,
+    probeCollectionFailures: probed.probeCollectionFailures,
+    otherProbeFailures: probed.otherProbeFailures,
     unreachableFrames: probed.unreachable,
     injectionAttempted,
     framesInjected,
     readableLinkedInFrames: usable.length,
     framesWithMessages: usable.filter((probe) => Number(probe.diagnostics?.messagesCollected) > 0).length,
   };
+  safeBackgroundLog('probe-summary', aggregate);
   if (!selected) throw diagnosticError('No readable LinkedIn document was found. Automatic reinjection was attempted; copy safe diagnostics if this persists.', aggregate);
   const response = await chrome.tabs.sendMessage(tabId, { type: 'private-social-export', format }, { frameId: selected.frameId });
   const diagnostics = { ...aggregate, ...(response?.diagnostics ?? {}) };
@@ -89,15 +93,27 @@ async function linkedInFrames(tabId) {
 
 async function probeLinkedInFrames(tabId, frames) {
   const probes = []; let responses = 0; let initializationErrors = 0; let unreachable = 0;
+  let coreBootstrapFailures = 0; let probeCollectionFailures = 0; let otherProbeFailures = 0;
   for (const frame of frames) {
     try {
       const response = await chrome.tabs.sendMessage(tabId, { type: 'private-linkedin-probe' }, { frameId: frame.frameId });
       responses += 1;
       if (response?.ok) probes.push({ frameId: frame.frameId, ...response });
-      else initializationErrors += 1;
+      else {
+        initializationErrors += 1;
+        const stage = response?.diagnostics?.failureStage;
+        if (stage === 'core-bootstrap') coreBootstrapFailures += 1;
+        else if (stage === 'probe-mode' || stage === 'probe-collection') probeCollectionFailures += 1;
+        else otherProbeFailures += 1;
+      }
     } catch { unreachable += 1; }
   }
-  return { probes, responses, initializationErrors, unreachable };
+  return { probes, responses, initializationErrors, unreachable, coreBootstrapFailures, probeCollectionFailures, otherProbeFailures };
+}
+
+function safeBackgroundLog(event, details = {}) {
+  const allowed = Object.fromEntries(Object.entries(details).filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value)));
+  console.info('[Private Social Export]', event, allowed);
 }
 
 function linkedInProbeScore(probe) {
