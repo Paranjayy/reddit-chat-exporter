@@ -10,7 +10,7 @@ test('supports Gmail and Drive with local email export content scripts', () => {
   const matches = manifest.content_scripts.flatMap((entry) => entry.matches ?? []);
   assert.ok(matches.includes('https://mail.google.com/*'));
   assert.ok(matches.includes('https://drive.google.com/*'));
-  assert.ok(manifest.version === '0.4.8');
+  assert.ok(manifest.version === '0.4.9');
   assert.match(background, /private-email-export/);
   assert.match(content, /private-email-export/);
 });
@@ -29,4 +29,17 @@ test('email diagnostics remain count-only', async () => {
   assert.equal(diagnostics.mode, 'gmail-thread');
   assert.equal(typeof diagnostics.links, 'number');
   assert.equal(JSON.stringify(diagnostics).includes('href'), false);
+});
+
+test('email ZIP attachment work is bounded and reports progress', async () => {
+  const { createEmailZip } = await import('../extension/core/email-ui.js');
+  const progress = [];
+  const data = {
+    type: 'gmail-thread',
+    exportedAt: new Date().toISOString(),
+    messages: [{ sender: 'Unknown sender', text: 'hello', attachments: [{ type: 'image', url: 'https://example.test/stuck.png', alt: 'image' }] }],
+  };
+  const archive = await createEmailZip(data, () => new Promise(() => {}), { timeoutMs: 5, onProgress: (value) => progress.push(value) });
+  assert.equal(archive.type, 'application/zip');
+  assert.deepEqual(progress, [{ completed: 0, total: 1 }, { completed: 1, total: 1 }]);
 });

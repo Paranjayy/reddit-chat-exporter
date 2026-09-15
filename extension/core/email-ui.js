@@ -41,12 +41,20 @@ export function toEmailMarkdown(data) {
   return '# ' + title + '\n\n- Exported: ' + new Date(data.exportedAt).toLocaleString() + '\n- Messages: ' + (data.messages ?? []).length + '\n\n' + rows.join('\n\n---\n\n') + '\n';
 }
 
-export async function createEmailZip(data, fetchAsset = fetchEmailAsset) {
+export async function createEmailZip(data, fetchAsset = fetchEmailAsset, options = {}) {
+  const { onProgress = () => {}, timeoutMs = 8_000 } = options;
   const files = []; const fetched = new Map();
   const urls = [...new Set((data.messages ?? []).flatMap((message) => (message.attachments ?? []).map((entry) => entry.url)).concat((data.attachments ?? []).map((entry) => entry.url)))];
-  for (const [index, url] of urls.entries()) {
-    try { const result = await fetchAsset(url); const name = 'attachments/' + String(index + 1).padStart(3, '0') + '-' + safePart(url) + extension(result.type, url); files.push({ name, data: await result.blob.arrayBuffer() }); fetched.set(url, name); } catch { /* retain remote link */ }
-  }
+  onProgress({ completed: 0, total: urls.length });
+  const results = await Promise.all(urls.map(async (url, index) => {
+    try {
+      const result = await withTimeout(fetchAsset(url), timeoutMs);
+      const name = 'attachments/' + String(index + 1).padStart(3, '0') + '-' + safePart(url) + extension(result.type, url);
+      return { url, file: { name, data: await result.blob.arrayBuffer() } };
+    } catch { return { url, file: null }; /* retain remote link */ }
+    finally { onProgress({ completed: index + 1, total: urls.length }); }
+  }));
+  for (const result of results) if (result.file) { files.push(result.file); fetched.set(result.url, result.file.name); }
   const markdown = toEmailMarkdown(data).replaceAll(/<https?:\/\/[^>]+>/g, (value) => '<' + (fetched.get(value.slice(1, -1)) || value.slice(1, -1)) + '>');
   files.unshift({ name: 'conversation.md', data: new TextEncoder().encode(markdown).buffer });
   files.splice(1, 0, { name: 'messages.json', data: new TextEncoder().encode(JSON.stringify(data, null, 2) + '\n').buffer });
@@ -70,6 +78,7 @@ function cleanHeading(value) { return String(value || '').replace(/[\r\n]+/g, ' 
 function renderedUrl(value) { try { const url = new URL(String(value || ''), location.href); return /^https?:$/.test(url.protocol) ? url.href : null; } catch { return null; } }
 function markdownAttachment(entry) { const target = entry.url || ''; const label = String(entry.alt || 'Attachment').replace(/[\[\]\\]/g, '\\$&'); return entry.type === 'image' ? '- ![' + label + '](<' + target + '>)' : '- [' + label + '](<' + target + '>)'; }
 async function fetchEmailAsset(url) { const response = await fetch(url, { credentials: 'include' }); if (!response.ok) throw new Error(String(response.status)); return { blob: await response.blob(), type: response.headers.get('content-type') || '' }; }
+function withTimeout(promise, timeoutMs) { return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('Attachment fetch timed out')), timeoutMs))]); }
 function safePart(url) { return String(url).split('/').pop()?.split('?')[0].replace(/[^a-z0-9_-]+/gi, '-').slice(0, 80) || 'attachment'; }
 function extension(type, url) { const known = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp', 'application/pdf': '.pdf' }; return known[String(type).split(';')[0]] || String(url).match(/\.[a-z0-9]{1,8}(?:$|\?)/i)?.[0].replace('?', '') || ''; }
 function makeZip(files) { const encoder = new TextEncoder(); const chunks = []; const central = []; let offset = 0; for (const file of files) { const name = encoder.encode(file.name); const data = new Uint8Array(file.data); const crc = crc32(data); const header = new Uint8Array(30 + name.length); const view = new DataView(header.buffer); view.setUint32(0, 0x04034b50, true); view.setUint16(4, 20, true); view.setUint32(18, data.length, true); view.setUint32(22, data.length, true); view.setUint16(26, name.length, true); header.set(name, 30); chunks.push(header, data); const entry = new Uint8Array(46 + name.length); const entryView = new DataView(entry.buffer); entryView.setUint32(0, 0x02014b50, true); entryView.setUint16(4, 20, true); entryView.setUint16(6, 20, true); entryView.setUint32(16, crc, true); entryView.setUint32(20, data.length, true); entryView.setUint32(24, data.length, true); entryView.setUint16(28, name.length, true); entryView.setUint32(42, offset, true); entry.set(name, 46); central.push(entry); offset += header.length + data.length; } const centralBytes = concat(central); const end = new Uint8Array(22); const endView = new DataView(end.buffer); endView.setUint32(0, 0x06054b50, true); endView.setUint16(8, files.length, true); endView.setUint16(10, files.length, true); endView.setUint32(12, centralBytes.length, true); endView.setUint32(16, offset, true); return new Blob([...chunks, centralBytes, end], { type: 'application/zip' }); }

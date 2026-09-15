@@ -48,7 +48,10 @@ async function exportEmailPage({ format = 'zip' } = {}) {
     error.diagnostics = diagnostics;
     throw error;
   }
-  if (format === 'zip') downloadLocally(await createEmailZip(data), `email-${new Date().toISOString().slice(0, 10)}.zip`, 'application/zip');
+  if (format === 'zip') {
+    updateEmailExportProgress({ completed: 0, total: data.messages?.flatMap((message) => message.attachments ?? []).length ?? data.attachments?.length ?? 0 });
+    downloadLocally(await createEmailZip(data, undefined, { onProgress: updateEmailExportProgress }), `email-${new Date().toISOString().slice(0, 10)}.zip`, 'application/zip');
+  }
   else if (format === 'markdown') downloadLocally(toEmailMarkdown(data), `email-${new Date().toISOString().slice(0, 10)}.md`, 'text/markdown;charset=utf-8');
   else downloadLocally(`${JSON.stringify(data, null, 2)}\n`, `email-${new Date().toISOString().slice(0, 10)}.json`, 'application/json;charset=utf-8');
   return { count, mode: data.type, diagnostics };
@@ -70,8 +73,15 @@ function installEmailExportControl() {
   if (document.getElementById('private-social-email-export-control')) return;
   const control = document.createElement('button'); control.id = 'private-social-email-export-control'; control.type = 'button'; control.textContent = 'Export email / Drive file';
   control.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;border:0;border-radius:999px;padding:10px 14px;background:#1a73e8;color:white;font:600 13px system-ui;box-shadow:0 3px 14px #0004;cursor:pointer';
-  control.onclick = async () => { control.disabled = true; control.textContent = 'Exporting…'; try { const response = await chrome.runtime.sendMessage({ type: 'private-email-export', format: 'zip' }); if (!response?.ok) throw new Error(response?.error || 'Export failed'); control.textContent = 'Saved email ZIP'; } catch (error) { control.textContent = error.message || 'Export failed'; } setTimeout(() => { control.disabled = false; control.textContent = 'Export email / Drive file'; }, 2500); };
+  emailExportControl = control;
+  control.onclick = async () => { control.disabled = true; control.textContent = 'Preparing…'; try { const response = await chrome.runtime.sendMessage({ type: 'private-email-export', format: 'zip' }); if (!response?.ok) throw new Error(response?.error || 'Export failed'); control.textContent = 'Saved email ZIP'; } catch (error) { control.textContent = error.message || 'Export failed'; } setTimeout(() => { control.disabled = false; control.textContent = 'Export email / Drive file'; }, 2500); };
   document.documentElement.append(control);
+}
+
+let emailExportControl;
+function updateEmailExportProgress({ completed = 0, total = 0 } = {}) {
+  if (!emailExportControl) return;
+  emailExportControl.textContent = total ? `Downloading ${completed}/${total}…` : 'Building email ZIP…';
 }
 
 async function exportLinkedInPage({ format = 'json' } = {}) {
