@@ -19,6 +19,19 @@ function collectDriveFile(root = document) {
   return { type: 'drive-file', exportedAt: new Date().toISOString(), name, attachments: collectEmailAttachments(root) };
 }
 
+function createEmailDiagnostics(root = document, mode = 'unknown') {
+  const count = (selector) => root.querySelectorAll(selector).length;
+  return {
+    mode,
+    gmailBodies: count('.a3s.aiL, .ii.gt, [data-message-id] .a3s, [data-legacy-message-id] .a3s'),
+    driveHeadings: count('[role="heading"], h1'),
+    links: count('a[href]'),
+    images: count('img[src]'),
+    downloadButtons: count('[aria-label*="download" i], [data-tooltip*="download" i]'),
+    messageContainers: count('.gs, .h7, .adn, [data-message-id], [data-legacy-message-id]'),
+  };
+}
+
 function toEmailMarkdown(data) {
   const title = cleanHeading(data.subject || data.name || (data.type === 'drive-file' ? 'Drive File' : 'Gmail Thread'));
   const rows = (data.messages ?? []).map((message) => {
@@ -66,5 +79,5 @@ function makeZip(files) { const encoder = new TextEncoder(); const chunks = []; 
 function concat(chunks) { const result = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0)); let offset = 0; for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.length; } return result; }
 function crc32(bytes) { let crc = 0xffffffff; for (const byte of bytes) { crc ^= byte; for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1)); } return (crc ^ 0xffffffff) >>> 0; }
 
-globalThis.__PRIVATE_SOCIAL_EMAIL_CORE__ = Object.freeze({ collectGmailThread, collectDriveFile, toEmailMarkdown, createEmailZip });
+globalThis.__PRIVATE_SOCIAL_EMAIL_CORE__ = Object.freeze({ collectGmailThread, collectDriveFile, createEmailDiagnostics, toEmailMarkdown, createEmailZip });
 })();

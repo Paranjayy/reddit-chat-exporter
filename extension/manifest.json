@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Private Social Export",
   "description": "Export supported Reddit, LinkedIn, Gmail, and Drive pages locally.",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "icons": {
     "16": "icons/private-social-export-16.png",
     "32": "icons/private-social-export-32.png",

@@ -16,6 +16,19 @@ export function collectDriveFile(root = document) {
   return { type: 'drive-file', exportedAt: new Date().toISOString(), name, attachments: collectEmailAttachments(root) };
 }
 
+export function createEmailDiagnostics(root = document, mode = 'unknown') {
+  const count = (selector) => root.querySelectorAll(selector).length;
+  return {
+    mode,
+    gmailBodies: count('.a3s.aiL, .ii.gt, [data-message-id] .a3s, [data-legacy-message-id] .a3s'),
+    driveHeadings: count('[role="heading"], h1'),
+    links: count('a[href]'),
+    images: count('img[src]'),
+    downloadButtons: count('[aria-label*="download" i], [data-tooltip*="download" i]'),
+    messageContainers: count('.gs, .h7, .adn, [data-message-id], [data-legacy-message-id]'),
+  };
+}
+
 export function toEmailMarkdown(data) {
   const title = cleanHeading(data.subject || data.name || (data.type === 'drive-file' ? 'Drive File' : 'Gmail Thread'));
   const rows = (data.messages ?? []).map((message) => {

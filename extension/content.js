@@ -37,14 +37,26 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 });
 
 async function exportEmailPage({ format = 'zip' } = {}) {
-  const { collectGmailThread, collectDriveFile, toEmailMarkdown, createEmailZip } = requireEmailCore();
-  const data = location.hostname === 'drive.google.com' ? collectDriveFile(document) : collectGmailThread(document);
+  const { collectGmailThread, collectDriveFile, createEmailDiagnostics, toEmailMarkdown, createEmailZip } = requireEmailCore();
+  const mode = location.hostname === 'drive.google.com' ? 'drive-file' : 'gmail-thread';
+  const diagnostics = createEmailDiagnostics(document, mode);
+  const data = mode === 'drive-file' ? collectDriveFile(document) : collectGmailThread(document);
   const count = data.messages?.length ?? data.attachments?.length ?? 0;
-  if (!count) throw new Error('No readable Gmail messages or Drive file was found. Open the email or file first.');
+  safeEmailLog('export-detected', diagnostics);
+  if (!count) {
+    const error = new Error(mode === 'gmail-thread' ? 'Open an individual Gmail message or thread first; the inbox list cannot be exported as a conversation.' : 'No readable Drive file was found. Open the file viewer first.');
+    error.diagnostics = diagnostics;
+    throw error;
+  }
   if (format === 'zip') downloadLocally(await createEmailZip(data), `email-${new Date().toISOString().slice(0, 10)}.zip`, 'application/zip');
   else if (format === 'markdown') downloadLocally(toEmailMarkdown(data), `email-${new Date().toISOString().slice(0, 10)}.md`, 'text/markdown;charset=utf-8');
   else downloadLocally(`${JSON.stringify(data, null, 2)}\n`, `email-${new Date().toISOString().slice(0, 10)}.json`, 'application/json;charset=utf-8');
-  return { count, mode: data.type };
+  return { count, mode: data.type, diagnostics };
+}
+
+function safeEmailLog(event, details = {}) {
+  const allowed = Object.fromEntries(Object.entries(details).filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value)));
+  console.info('[Private Social Export]', event, allowed);
 }
 
 function requireEmailCore() {
