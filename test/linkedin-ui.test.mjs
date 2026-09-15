@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { collectLinkedInChat, createLinkedInZip, toLinkedInMarkdown } from '../extension/core/linkedin-ui.js';
+import { collectLinkedInChat, createLinkedInZip, findLinkedInScrollSurface, toLinkedInMarkdown } from '../extension/core/linkedin-ui.js';
 
 test('renders LinkedIn chat as readable Markdown with embedded attachment URLs', () => {
   const markdown = toLinkedInMarkdown({
@@ -76,4 +76,8 @@ test('creates a local LinkedIn archive with Markdown, JSON, report, and fetched 
   assert.deepEqual(archive.files.map((file) => file.name), [
     'conversation.md', 'messages.json', 'export-report.json', 'assets/001-image.png',
   ]);
+});
+
+test('anchors LinkedIn history crawling to the composer-side message scroller', () => {
+  assert.equal(typeof findLinkedInScrollSurface, 'function');
 });

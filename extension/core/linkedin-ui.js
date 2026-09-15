@@ -254,18 +254,38 @@ function collectLinkedInAttachments(item) {
   return [...results.values()];
 }
 
-function findLinkedInScrollSurface(root) {
-  const items = findMessageItems(root);
-  const first = items[0];
-  for (let node = first?.parentElement; node; node = node.parentElement) {
-    const containsConversation = findMessageItems(node).length >= Math.min(items.length, 2);
+export function findLinkedInScrollSurface(root = document) {
+  const composer = findLinkedInComposer(root);
+  const column = composer?.parentElement;
+  const scoped = column ? [column, ...column.querySelectorAll('*')] : [];
+  const semantic = [...root.querySelectorAll('.msg-s-message-list-content, .msg-s-message-list-container, [role="log"]')];
+  const candidates = [...new Set([...scoped, ...semantic])].filter((node) => {
     let overflow = '';
     try { overflow = getComputedStyle(node).overflowY; } catch { /* non-browser test root */ }
-    const scrollableOverflow = /auto|scroll|overlay/i.test(overflow) || Number(node.scrollTop) > 0;
-    if (containsConversation && scrollableOverflow && Number(node.scrollHeight) > Number(node.clientHeight) + 8) return node;
-  }
-  return [...root.querySelectorAll('.msg-s-message-list-content, .msg-s-message-list-container, [role="log"]')]
-    .find((node) => Number(node.scrollHeight) > Number(node.clientHeight) + 8) || null;
+    return Number(node.clientHeight) > 220
+      && Number(node.scrollHeight) > Number(node.clientHeight) + 8
+      && (/auto|scroll|overlay/i.test(overflow) || Number(node.scrollTop) > 0)
+      && findMessageItems(node).length > 0;
+  });
+  candidates.sort((a, b) => linkedInScrollScore(b, composer) - linkedInScrollScore(a, composer));
+  return candidates[0] || null;
+}
+
+function findLinkedInComposer(root) {
+  return [...root.querySelectorAll('textarea, input, [contenteditable="true"], [role="textbox"]')]
+    .find((node) => /write a message|type a message/i.test(`${node.getAttribute?.('placeholder') ?? ''} ${node.getAttribute?.('aria-label') ?? ''} ${node.textContent ?? ''}`));
+}
+
+function linkedInScrollScore(node, composer) {
+  const hints = `${node.getAttribute?.('class') ?? ''} ${node.getAttribute?.('aria-label') ?? ''} ${node.getAttribute?.('role') ?? ''}`;
+  const distance = composer ? ancestorDistance(composer, node) : 0;
+  return (findMessageItems(node).length * 100) + (/message-list|conversation|role/i.test(hints) ? 30 : 0) - distance;
+}
+
+function ancestorDistance(child, ancestor) {
+  let distance = 0;
+  for (let node = child; node; node = node.parentElement) { if (node === ancestor) return distance; distance += 1; }
+  return 100;
 }
 
 async function waitForLinkedInChange(root, surface, before) {
