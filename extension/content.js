@@ -105,7 +105,7 @@ function installLinkedInExportControl() {
   control.addEventListener('click', async () => {
     const original = control.textContent; control.disabled = true; control.textContent = 'Exporting…';
     try {
-      const response = await chrome.runtime.sendMessage({ type: 'private-linkedin-coordinated-export', format: 'json' });
+      const response = await chrome.runtime.sendMessage({ type: 'private-linkedin-coordinated-export', format: 'zip' });
       if (!response?.ok) throw Object.assign(new Error(response?.error ?? 'Export failed'), { diagnostics: response?.diagnostics });
       control.textContent = `Saved ${response.mode.replace('linkedin-', '')}`;
     }

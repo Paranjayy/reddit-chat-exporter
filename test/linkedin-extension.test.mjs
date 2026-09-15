@@ -5,6 +5,7 @@ import vm from 'node:vm';
 
 const manifest = JSON.parse(fs.readFileSync(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
 const background = fs.readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
+const content = fs.readFileSync(new URL('../extension/content.js', import.meta.url), 'utf8');
 
 test('LinkedIn collector runs in embedded messaging frames', () => {
   const linkedinScript = manifest.content_scripts.find((entry) =>
@@ -27,6 +28,7 @@ test('LinkedIn collector runs in embedded messaging frames', () => {
   assert.match(background, /probed\.coreBootstrapFailures === probed\.initializationErrors/);
   assert.match(background, /files: \['core\/linkedin-ui\.classic\.js', 'content\.js'\]/);
   assert.match(background, /Chat with attachments as ZIP/);
+  assert.match(content, /type: 'private-linkedin-coordinated-export', format: 'zip'/);
 });
 
 test('classic LinkedIn core bootstraps without dynamic module import', () => {
