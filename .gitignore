@@ -7,6 +7,9 @@ captures/
 attachments/
 downloads/
 
+# Raw LinkedIn DOM captures can contain private message content and identifiers.
+**/linkedin-dom.md
+
 # Browser and local development debris.
 .DS_Store
 node_modules/
