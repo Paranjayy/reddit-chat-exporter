@@ -4,7 +4,8 @@
 // `type: module` content_scripts entry.  The two audited shared modules are
 // loaded from this extension package only; this script never fetches anything.
 const isLinkedInPage = /^https:\/\/(www\.)?linkedin\.com\//.test(location.href);
-const core = isLinkedInPage ? null : Promise.all([
+const isEmailPage = /^https:\/\/(?:mail|drive)\.google\.com\//.test(location.href);
+const core = isLinkedInPage || isEmailPage ? null : Promise.all([
   import(chrome.runtime.getURL('core/exporter.js')),
   import(chrome.runtime.getURL('core/reddit-ui.js')),
 ]);
@@ -13,11 +14,13 @@ if (isLinkedInPage) {
   safeLinkedInLog('content-ready', { coreAvailable: Boolean(globalThis.__PRIVATE_SOCIAL_LINKEDIN_CORE__), isTopFrame: window.top === window });
   if (window.top === window) installLinkedInExportControl();
 }
+if (isEmailPage && window.top === window) installEmailExportControl();
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-  if (!['private-reddit-chat-preview', 'private-reddit-chat-export', 'private-reddit-chat-list-rooms', 'private-reddit-chat-download-index', 'private-social-export', 'private-linkedin-probe'].includes(request?.type)) return undefined;
+  if (!['private-reddit-chat-preview', 'private-reddit-chat-export', 'private-reddit-chat-list-rooms', 'private-reddit-chat-download-index', 'private-social-export', 'private-linkedin-probe', 'private-email-export'].includes(request?.type)) return undefined;
 
-  const operation = request.type === 'private-linkedin-probe' ? probeLinkedInPage()
+  const operation = request.type === 'private-email-export' ? exportEmailPage(request)
+    : request.type === 'private-linkedin-probe' ? probeLinkedInPage()
     : request.type === 'private-social-export' ? exportLinkedInPage(request)
     : request.type === 'private-reddit-chat-preview' ? previewCurrentChat()
     : request.type === 'private-reddit-chat-list-rooms' ? listLoadedRooms()
@@ -32,6 +35,32 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     });
   return true;
 });
+
+async function exportEmailPage({ format = 'zip' } = {}) {
+  const { collectGmailThread, collectDriveFile, toEmailMarkdown, createEmailZip } = requireEmailCore();
+  const data = location.hostname === 'drive.google.com' ? collectDriveFile(document) : collectGmailThread(document);
+  const count = data.messages?.length ?? data.attachments?.length ?? 0;
+  if (!count) throw new Error('No readable Gmail messages or Drive file was found. Open the email or file first.');
+  if (format === 'zip') downloadLocally(await createEmailZip(data), `email-${new Date().toISOString().slice(0, 10)}.zip`, 'application/zip');
+  else if (format === 'markdown') downloadLocally(toEmailMarkdown(data), `email-${new Date().toISOString().slice(0, 10)}.md`, 'text/markdown;charset=utf-8');
+  else downloadLocally(`${JSON.stringify(data, null, 2)}\n`, `email-${new Date().toISOString().slice(0, 10)}.json`, 'application/json;charset=utf-8');
+  return { count, mode: data.type };
+}
+
+function requireEmailCore() {
+  const value = globalThis.__PRIVATE_SOCIAL_EMAIL_CORE__;
+  if (value) return value;
+  const error = new Error('The Gmail/Drive collector did not initialize. Reload the extension and try again.');
+  error.failureStage = 'core-bootstrap'; throw error;
+}
+
+function installEmailExportControl() {
+  if (document.getElementById('private-social-email-export-control')) return;
+  const control = document.createElement('button'); control.id = 'private-social-email-export-control'; control.type = 'button'; control.textContent = 'Export email / Drive file';
+  control.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;border:0;border-radius:999px;padding:10px 14px;background:#1a73e8;color:white;font:600 13px system-ui;box-shadow:0 3px 14px #0004;cursor:pointer';
+  control.onclick = async () => { control.disabled = true; control.textContent = 'Exporting…'; try { const response = await chrome.runtime.sendMessage({ type: 'private-email-export', format: 'zip' }); if (!response?.ok) throw new Error(response?.error || 'Export failed'); control.textContent = 'Saved email ZIP'; } catch (error) { control.textContent = error.message || 'Export failed'; } setTimeout(() => { control.disabled = false; control.textContent = 'Export email / Drive file'; }, 2500); };
+  document.documentElement.append(control);
+}
 
 async function exportLinkedInPage({ format = 'json' } = {}) {
   const { detectLinkedInMode, expandLinkedInPage, collectLinkedInProfile, collectLinkedInChatHistory, createLinkedInDiagnostics, toLinkedInMarkdown, createLinkedInZip } = requireLinkedInCore();

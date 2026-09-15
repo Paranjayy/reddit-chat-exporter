@@ -34,9 +34,11 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-  if (!['private-reddit-chat-bulk-export', 'private-linkedin-coordinated-export'].includes(request?.type)) return undefined;
+  if (!['private-reddit-chat-bulk-export', 'private-linkedin-coordinated-export', 'private-email-export'].includes(request?.type)) return undefined;
   const operation = request.type === 'private-linkedin-coordinated-export'
     ? exportLinkedInAcrossFrames(request.tabId ?? _sender.tab?.id, request.format)
+    : request.type === 'private-email-export'
+      ? chrome.tabs.sendMessage(request.tabId ?? _sender.tab?.id, request, { frameId: _sender.frameId ?? 0 })
     : bulkExportLoadedChats(request);
   operation
     .then((result) => sendResponse({ ok: true, ...result }))

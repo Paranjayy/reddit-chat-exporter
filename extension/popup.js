@@ -23,13 +23,15 @@ form.addEventListener('submit', async (event) => {
   try {
     const labels = readLabels();
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id || !/^https:\/\/(www\.)?(reddit\.com\/chat\/|linkedin\.com\/)/.test(tab.url)) {
-      throw new Error('Open a supported Reddit chat or LinkedIn page, then use this button again.');
+    if (!tab?.id || !/^https:\/\/(www\.)?(reddit\.com\/chat\/|linkedin\.com\/|mail\.google\.com\/|drive\.google\.com\/)/.test(tab.url)) {
+      throw new Error('Open a supported Reddit, LinkedIn, Gmail, or Drive page, then use this button again.');
     }
     const isLinkedIn = /linkedin\.com\//.test(tab.url);
+    const isEmail = /(?:mail|drive)\.google\.com\//.test(tab.url);
     if (isLinkedIn) setStatus('Slowly loading older LinkedIn messages and collecting attachments…', 'working');
+    if (isEmail) setStatus('Reading Gmail or Drive locally and gathering attachments…', 'working');
     const request = {
-      type: isLinkedIn ? 'private-linkedin-coordinated-export' : 'private-reddit-chat-export',
+      type: isLinkedIn ? 'private-linkedin-coordinated-export' : isEmail ? 'private-email-export' : 'private-reddit-chat-export',
       tabId: tab.id,
       format: new FormData(form).get('format'),
       labels,
@@ -162,6 +164,16 @@ function setBusy(busy) {
 
 async function configurePopup() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (/(?:mail|drive)\.google\.com\//.test(tab?.url ?? '')) {
+    document.querySelector('h1').textContent = 'Export this email or Drive file.';
+    document.querySelector('.lede').textContent = 'Gmail and Drive content is read locally. Nothing is sent anywhere.';
+    button.innerHTML = 'Export email / Drive file <span aria-hidden="true">↓</span>';
+    previewButton.hidden = true; bulkExportButton.hidden = true;
+    document.querySelector('#participant-labels').closest('fieldset').hidden = true;
+    document.querySelector('#linkedin-zip-format').hidden = false;
+    document.querySelector('#linkedin-zip-format input').checked = true;
+    return;
+  }
   if (!/linkedin\.com\//.test(tab?.url ?? '')) return;
   document.querySelector('h1').textContent = 'Export this LinkedIn page.';
   document.querySelector('.lede').textContent = 'Profile, full chat, or an open messaging popup is read locally. Nothing is sent anywhere.';

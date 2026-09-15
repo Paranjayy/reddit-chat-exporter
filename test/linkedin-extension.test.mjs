@@ -17,7 +17,7 @@ test('LinkedIn collector runs in embedded messaging frames', () => {
   assert.deepEqual(linkedinScript.js, ['core/linkedin-ui.classic.js', 'content.js']);
   assert.ok(manifest.permissions.includes('webNavigation'));
   assert.ok(manifest.permissions.includes('scripting'));
-  assert.equal(manifest.version, '0.4.6');
+  assert.equal(manifest.version, '0.4.7');
   assert.deepEqual(manifest.icons, {
     16: 'icons/private-social-export-16.png',
     32: 'icons/private-social-export-32.png',

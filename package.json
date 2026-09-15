@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build:linkedin-core": "node scripts/build-linkedin-classic.mjs",
-    "test": "npm run build:linkedin-core && node --test",
+    "build:email-core": "node scripts/build-email-classic.mjs",
+    "test": "npm run build:linkedin-core && npm run build:email-core && node --test",
     "build:console": "node scripts/build-console.mjs"
   }
 }

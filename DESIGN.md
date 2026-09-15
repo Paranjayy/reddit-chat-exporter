@@ -13,6 +13,7 @@ Export supported Reddit and LinkedIn pages as local JSON or Markdown backups. Th
 - `extension/core/linkedin-ui.js` expands and collects LinkedIn profiles, full-page chats, and popup chats. LinkedIn messaging is probed across readable frames because Safari may isolate the rendered conversation from the top document.
 - LinkedIn exports can be saved as JSON, Markdown, or a local ZIP containing conversation files and rendered attachments when the page permits the browser to read them. Failed attachment fetches remain usable as remote links and are reported only as aggregate counts.
 - `extension/icons/private-social-export-*.png` provides recognizable browser and popup branding.
+- `extension/core/email-ui.js` collects rendered Gmail threads and standalone Drive file pages, preserving names and ordinary attachment links for local Markdown, JSON, and ZIP exports.
 - `dist/reddit-chat-exporter.console.js` is the standalone console variant.
 
 ## Privacy model
@@ -26,6 +27,8 @@ Message and export timestamps use the browser’s local RFC 3339 date/time and U
 Reddit’s UI is not a stable API. The collector operates on loaded messages, attempts each visible reply thread, and records count-only diagnostics. Exact duplicate removal is explicitly opt-in and only removes structurally identical sanitized messages at the same thread level. Bulk export is intentionally bounded: it visits at most 20 room links already rendered in Reddit’s sidebar, downloads each as a separate neutral-name file, skips failures individually, and restores the initially open chat. It does not fetch, search, or paginate chats.
 
 LinkedIn’s UI is likewise unstable and may render messaging inside an embedded frame. Its collector is prebuilt as a classic content script because Safari does not initialize the dynamically imported module reliably. The background worker probes all readable LinkedIn frames using count-only diagnostics, selects the frame with actual message candidates, and then performs one download there. If an unpacked-extension reload leaves stale page controls with dead listeners, one local content-script reinjection repairs the current tab before probing again. Chat export slowly walks the rendered message surface toward its oldest stable position, merges overlapping DOM snapshots in page order, and restores the user’s relative scroll position. Rendered message, GIF, image, video, and file URLs are preserved; ZIP mode attempts local attachment copies without adding network services. Chat mode refuses to create a misleading empty backup. Safe diagnostics and console logs contain only stages, modes, booleans, and DOM counts—never text, names, URLs, or thread identifiers.
+
+Gmail and Drive use a separate classic content script because both applications render attachment viewers and message content with provider-specific DOM. Gmail collection is limited to rendered message bodies and attachment links; Drive collection is limited to the visible file title and download/media links. ZIP mode attempts credentialed browser fetches for rendered attachments, but never uses a Drive API or uploads content. A protected or oversized file remains a remote link in Markdown and increments an aggregate failure count.
 
 ## Release checklist
 

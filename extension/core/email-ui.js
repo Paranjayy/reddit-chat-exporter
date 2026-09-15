@@ -1,0 +1,64 @@
+// Local DOM-only Gmail and Google Drive extractors.
+
+export function collectGmailThread(root = document) {
+  const bodies = [...root.querySelectorAll('.a3s.aiL, .ii.gt, [data-message-id] .a3s, [data-legacy-message-id] .a3s')];
+  const messages = [...new Set(bodies.map((body) => {
+    const container = body.closest('.gs, .h7, .adn, [data-message-id], [data-legacy-message-id]') || body;
+    const senderNode = container.querySelector('.gD, .go, [email], [data-hovercard-id]');
+    const timeNode = container.querySelector('.g3, time, [datetime], [title*="202"]');
+    return { sender: (senderNode?.getAttribute('name') || senderNode?.textContent || senderNode?.getAttribute('email') || 'Unknown sender').trim(), timestamp: timeNode?.getAttribute('datetime') || timeNode?.getAttribute('title') || timeNode?.textContent?.trim() || null, text: cleanEmailText(body.innerText || body.textContent || ''), attachments: collectEmailAttachments(container) };
+  }))].filter((message) => message.text || message.attachments.length);
+  return { type: 'gmail-thread', exportedAt: new Date().toISOString(), subject: root.querySelector('h2.hP, h1')?.textContent?.trim() || null, messages };
+}
+
+export function collectDriveFile(root = document) {
+  const name = root.querySelector('[role="heading"], h1, [aria-label*="Name"]')?.textContent?.trim() || document.title || 'Drive file';
+  return { type: 'drive-file', exportedAt: new Date().toISOString(), name, attachments: collectEmailAttachments(root) };
+}
+
+export function toEmailMarkdown(data) {
+  const title = cleanHeading(data.subject || data.name || (data.type === 'drive-file' ? 'Drive File' : 'Gmail Thread'));
+  const rows = (data.messages ?? []).map((message) => {
+    const sender = cleanHeading(message.sender || 'Unknown sender');
+    const time = message.timestamp ? ' — ' + cleanHeading(message.timestamp) : '';
+    const attachments = (message.attachments ?? []).map(markdownAttachment).filter(Boolean);
+    return '## ' + sender + time + '\n\n' + (message.text || '_Attachment-only message._') + (attachments.length ? '\n\n### Attachments\n\n' + attachments.join('\n') : '');
+  });
+  if (data.type === 'drive-file') rows.push(...(data.attachments ?? []).map(markdownAttachment).filter(Boolean));
+  return '# ' + title + '\n\n- Exported: ' + new Date(data.exportedAt).toLocaleString() + '\n- Messages: ' + (data.messages ?? []).length + '\n\n' + rows.join('\n\n---\n\n') + '\n';
+}
+
+export async function createEmailZip(data, fetchAsset = fetchEmailAsset) {
+  const files = []; const fetched = new Map();
+  const urls = [...new Set((data.messages ?? []).flatMap((message) => (message.attachments ?? []).map((entry) => entry.url)).concat((data.attachments ?? []).map((entry) => entry.url)))];
+  for (const [index, url] of urls.entries()) {
+    try { const result = await fetchAsset(url); const name = 'attachments/' + String(index + 1).padStart(3, '0') + '-' + safePart(url) + extension(result.type, url); files.push({ name, data: await result.blob.arrayBuffer() }); fetched.set(url, name); } catch { /* retain remote link */ }
+  }
+  const markdown = toEmailMarkdown(data).replaceAll(/<https?:\/\/[^>]+>/g, (value) => '<' + (fetched.get(value.slice(1, -1)) || value.slice(1, -1)) + '>');
+  files.unshift({ name: 'conversation.md', data: new TextEncoder().encode(markdown).buffer });
+  files.splice(1, 0, { name: 'messages.json', data: new TextEncoder().encode(JSON.stringify(data, null, 2) + '\n').buffer });
+  files.splice(2, 0, { name: 'export-report.json', data: new TextEncoder().encode(JSON.stringify({ exportedAt: data.exportedAt, messageCount: data.messages?.length ?? 0, attachments: urls.length, attachmentsFetched: fetched.size, attachmentsFailed: urls.length - fetched.size }, null, 2) + '\n').buffer });
+  const archive = makeZip(files); archive.files = files.map(({ name }) => ({ name })); return archive;
+}
+
+function collectEmailAttachments(container) {
+  const result = new Map();
+  for (const node of container.querySelectorAll('a[href], img[src], [role="button"][aria-label*="download" i]')) {
+    const url = renderedUrl(node.getAttribute('href') || node.currentSrc || node.getAttribute('src'));
+    if (!url || /mail\.google\.com\/mail\/u\/\d+\/#(inbox|sent|trash)/i.test(url)) continue;
+    const label = (node.textContent || node.getAttribute('aria-label') || node.getAttribute('alt') || '').trim();
+    const isImage = node.tagName?.toLowerCase() === 'img' || /\.(?:png|jpe?g|gif|webp)(?:[?#]|$)/i.test(url);
+    if (isImage || /download|attachment|document|file|drive/i.test(label + ' ' + url)) result.set(url, { type: isImage ? 'image' : 'file', url, alt: label || (isImage ? 'Email image' : 'Email attachment') });
+  }
+  return [...result.values()];
+}
+function cleanEmailText(value) { return String(value).replace(/\u00a0/g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim(); }
+function cleanHeading(value) { return String(value || '').replace(/[\r\n]+/g, ' ').replace(/#/g, '\\#').trim(); }
+function renderedUrl(value) { try { const url = new URL(String(value || ''), location.href); return /^https?:$/.test(url.protocol) ? url.href : null; } catch { return null; } }
+function markdownAttachment(entry) { const target = entry.url || ''; const label = String(entry.alt || 'Attachment').replace(/[\[\]\\]/g, '\\$&'); return entry.type === 'image' ? '- ![' + label + '](<' + target + '>)' : '- [' + label + '](<' + target + '>)'; }
+async function fetchEmailAsset(url) { const response = await fetch(url, { credentials: 'include' }); if (!response.ok) throw new Error(String(response.status)); return { blob: await response.blob(), type: response.headers.get('content-type') || '' }; }
+function safePart(url) { return String(url).split('/').pop()?.split('?')[0].replace(/[^a-z0-9_-]+/gi, '-').slice(0, 80) || 'attachment'; }
+function extension(type, url) { const known = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp', 'application/pdf': '.pdf' }; return known[String(type).split(';')[0]] || String(url).match(/\.[a-z0-9]{1,8}(?:$|\?)/i)?.[0].replace('?', '') || ''; }
+function makeZip(files) { const encoder = new TextEncoder(); const chunks = []; const central = []; let offset = 0; for (const file of files) { const name = encoder.encode(file.name); const data = new Uint8Array(file.data); const crc = crc32(data); const header = new Uint8Array(30 + name.length); const view = new DataView(header.buffer); view.setUint32(0, 0x04034b50, true); view.setUint16(4, 20, true); view.setUint32(18, data.length, true); view.setUint32(22, data.length, true); view.setUint16(26, name.length, true); header.set(name, 30); chunks.push(header, data); const entry = new Uint8Array(46 + name.length); const entryView = new DataView(entry.buffer); entryView.setUint32(0, 0x02014b50, true); entryView.setUint16(4, 20, true); entryView.setUint16(6, 20, true); entryView.setUint32(16, crc, true); entryView.setUint32(20, data.length, true); entryView.setUint32(24, data.length, true); entryView.setUint16(28, name.length, true); entryView.setUint32(42, offset, true); entry.set(name, 46); central.push(entry); offset += header.length + data.length; } const centralBytes = concat(central); const end = new Uint8Array(22); const endView = new DataView(end.buffer); endView.setUint32(0, 0x06054b50, true); endView.setUint16(8, files.length, true); endView.setUint16(10, files.length, true); endView.setUint32(12, centralBytes.length, true); endView.setUint32(16, offset, true); return new Blob([...chunks, centralBytes, end], { type: 'application/zip' }); }
+function concat(chunks) { const result = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0)); let offset = 0; for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.length; } return result; }
+function crc32(bytes) { let crc = 0xffffffff; for (const byte of bytes) { crc ^= byte; for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1)); } return (crc ^ 0xffffffff) >>> 0; }
