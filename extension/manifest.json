@@ -2,7 +2,13 @@
   "manifest_version": 3,
   "name": "Private Social Export",
   "description": "Export supported Reddit and LinkedIn pages locally.",
-  "version": "0.4.5",
+  "version": "0.4.6",
+  "icons": {
+    "16": "icons/private-social-export-16.png",
+    "32": "icons/private-social-export-32.png",
+    "48": "icons/private-social-export-48.png",
+    "128": "icons/private-social-export-128.png"
+  },
   "permissions": ["activeTab", "contextMenus", "webNavigation", "scripting"],
   "action": {
     "default_title": "Export current Reddit chat",

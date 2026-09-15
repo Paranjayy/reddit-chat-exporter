@@ -16,9 +16,17 @@ test('LinkedIn collector runs in embedded messaging frames', () => {
   assert.deepEqual(linkedinScript.js, ['core/linkedin-ui.classic.js', 'content.js']);
   assert.ok(manifest.permissions.includes('webNavigation'));
   assert.ok(manifest.permissions.includes('scripting'));
-  assert.equal(manifest.version, '0.4.5');
+  assert.equal(manifest.version, '0.4.6');
+  assert.deepEqual(manifest.icons, {
+    16: 'icons/private-social-export-16.png',
+    32: 'icons/private-social-export-32.png',
+    48: 'icons/private-social-export-48.png',
+    128: 'icons/private-social-export-128.png',
+  });
+  for (const icon of Object.values(manifest.icons)) assert.ok(fs.existsSync(new URL(`../extension/${icon}`, import.meta.url)));
   assert.match(background, /probed\.coreBootstrapFailures === probed\.initializationErrors/);
   assert.match(background, /files: \['core\/linkedin-ui\.classic\.js', 'content\.js'\]/);
+  assert.match(background, /Chat with attachments as ZIP/);
 });
 
 test('classic LinkedIn core bootstraps without dynamic module import', () => {

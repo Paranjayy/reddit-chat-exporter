@@ -110,6 +110,75 @@ export function toLinkedInMarkdown(data) {
   return `# LinkedIn Chat Export\n\n- Exported: ${exported}\n- Messages: ${(data.messages ?? []).length}\n\n${messages.join('\n\n---\n\n')}\n`;
 }
 
+export async function createLinkedInZip(data, fetchAsset = fetchLinkedInAsset) {
+  const files = [];
+  const localByUrl = new Map();
+  const failures = [];
+  const urls = [...new Set((data.messages ?? []).flatMap((message) => (message.attachments ?? []).map((entry) => entry.url).filter(Boolean)))];
+  for (const [index, url] of urls.entries()) {
+    try {
+      const result = await fetchAsset(url);
+      const extension = fileExtension(result.type, url);
+      const name = `assets/${String(index + 1).padStart(3, '0')}-${safeFilePart(urlFileName(url))}${extension}`;
+      files.push({ name, data: await result.blob.arrayBuffer() });
+      localByUrl.set(url, name);
+    } catch {
+      failures.push({});
+    }
+  }
+  const portable = JSON.parse(JSON.stringify(data));
+  for (const message of portable.messages ?? []) for (const attachment of message.attachments ?? []) {
+    const localPath = localByUrl.get(attachment.url);
+    if (localPath) attachment.localPath = localPath;
+  }
+  const markdownData = JSON.parse(JSON.stringify(portable));
+  let markdown = toLinkedInMarkdown(markdownData);
+  for (const [url, localPath] of localByUrl) markdown = markdown.replaceAll(`<${url}>`, `<${localPath}>`);
+  files.unshift({ name: 'conversation.md', data: new TextEncoder().encode(markdown).buffer });
+  files.splice(1, 0, { name: 'messages.json', data: new TextEncoder().encode(`${JSON.stringify(portable, null, 2)}\n`).buffer });
+  files.splice(2, 0, { name: 'export-report.json', data: new TextEncoder().encode(`${JSON.stringify({ exportedAt: portable.exportedAt, messageCount: portable.messages?.length ?? 0, assetCount: urls.length, assetsFetched: localByUrl.size, assetsFailed: failures.length }, null, 2)}\n`).buffer });
+  const archive = makeZip(files);
+  archive.files = files.map(({ name }) => ({ name }));
+  return archive;
+}
+
+async function fetchLinkedInAsset(url) {
+  const response = await fetch(url, { credentials: 'include', redirect: 'follow' });
+  if (!response.ok) throw new Error(`Attachment request failed: ${response.status}`);
+  return { blob: await response.blob(), type: response.headers.get('content-type') || '' };
+}
+
+function fileExtension(type, url) {
+  const mime = String(type).split(';')[0].toLowerCase();
+  const known = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp', 'application/pdf': '.pdf', 'video/mp4': '.mp4' };
+  if (known[mime]) return known[mime];
+  try { return new URL(url).pathname.match(/\.[a-z0-9]{1,8}$/i)?.[0] || ''; } catch { return ''; }
+}
+
+function urlFileName(url) {
+  try { return decodeURIComponent(new URL(url).pathname.split('/').pop() || 'attachment').replace(/\.[a-z0-9]{1,8}$/i, '') || 'attachment'; } catch { return 'attachment'; }
+}
+
+function safeFilePart(value) { return String(value).replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 100) || 'attachment'; }
+
+function makeZip(files) {
+  const encoder = new TextEncoder(); const chunks = []; const central = []; let offset = 0;
+  for (const file of files) {
+    const name = encoder.encode(file.name); const data = new Uint8Array(file.data); const crc = crc32(data);
+    const header = new Uint8Array(30 + name.length); const view = new DataView(header.buffer);
+    view.setUint32(0, 0x04034b50, true); view.setUint16(4, 20, true); view.setUint16(8, 0, true); view.setUint16(10, 0, true); view.setUint16(14, 0, true); view.setUint32(18, data.length, true); view.setUint32(22, data.length, true); view.setUint16(26, name.length, true); header.set(name, 30);
+    chunks.push(header, data);
+    const entry = new Uint8Array(46 + name.length); const entryView = new DataView(entry.buffer);
+    entryView.setUint32(0, 0x02014b50, true); entryView.setUint16(4, 20, true); entryView.setUint16(6, 20, true); entryView.setUint32(16, crc, true); entryView.setUint32(20, data.length, true); entryView.setUint32(24, data.length, true); entryView.setUint16(28, name.length, true); entryView.setUint32(42, offset, true); entry.set(name, 46); central.push(entry); offset += header.length + data.length;
+  }
+  const centralBytes = concatBytes(central); const end = new Uint8Array(22); const endView = new DataView(end.buffer);
+  endView.setUint32(0, 0x06054b50, true); endView.setUint16(8, files.length, true); endView.setUint16(10, files.length, true); endView.setUint32(12, centralBytes.length, true); endView.setUint32(16, offset, true);
+  return new Blob([...chunks, centralBytes, end], { type: 'application/zip' });
+}
+
+function concatBytes(chunks) { const result = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0)); let offset = 0; for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.length; } return result; }
+function crc32(bytes) { let crc = 0xffffffff; for (const byte of bytes) { crc ^= byte; for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1)); } return (crc ^ 0xffffffff) >>> 0; }
+
 export function createLinkedInDiagnostics(root = document, mode = detectLinkedInMode(location.href, root), isTopFrame = true) {
   const selectorCounts = Object.fromEntries(MESSAGE_SELECTORS.map((selector, index) => [
     `candidateFamily${index + 1}`,

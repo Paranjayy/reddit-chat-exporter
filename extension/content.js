@@ -34,7 +34,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 });
 
 async function exportLinkedInPage({ format = 'json' } = {}) {
-  const { detectLinkedInMode, expandLinkedInPage, collectLinkedInProfile, collectLinkedInChatHistory, createLinkedInDiagnostics, toLinkedInMarkdown } = requireLinkedInCore();
+  const { detectLinkedInMode, expandLinkedInPage, collectLinkedInProfile, collectLinkedInChatHistory, createLinkedInDiagnostics, toLinkedInMarkdown, createLinkedInZip } = requireLinkedInCore();
   const mode = await atLinkedInStage('mode-detection', () => detectLinkedInMode(location.href, document));
   if (mode === 'unsupported') throw new Error('Open a LinkedIn profile or chat before exporting.');
   safeLinkedInLog('export-started', { mode, isTopFrame: window.top === window });
@@ -56,8 +56,13 @@ async function exportLinkedInPage({ format = 'json' } = {}) {
     error.diagnostics = diagnostics;
     throw error;
   }
-  const body = await atLinkedInStage('serialization', () => format === 'markdown' ? toLinkedInMarkdown(data) : `${JSON.stringify(data, null, 2)}\n`);
-  downloadLocally(body, `linkedin-${mode}-${new Date().toISOString().slice(0, 10)}.${format === 'markdown' ? 'md' : 'json'}`, format === 'markdown' ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8');
+  if (format === 'zip') {
+    const archive = await atLinkedInStage('archive', () => createLinkedInZip(data));
+    downloadLocally(archive, `linkedin-${mode}-${new Date().toISOString().slice(0, 10)}.zip`, 'application/zip');
+  } else {
+    const body = await atLinkedInStage('serialization', () => format === 'markdown' ? toLinkedInMarkdown(data) : `${JSON.stringify(data, null, 2)}\n`);
+    downloadLocally(body, `linkedin-${mode}-${new Date().toISOString().slice(0, 10)}.${format === 'markdown' ? 'md' : 'json'}`, format === 'markdown' ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8');
+  }
   const warnings = mode !== 'linkedin-profile' && !diagnostics.historyComplete
     ? ['LinkedIn stopped changing before the oldest-history boundary could be confirmed; review the first exported message.']
     : [];
@@ -176,7 +181,7 @@ async function getCurrentChat(collectChatWithThreads) {
 }
 
 function downloadLocally(body, filename, type) {
-  const url = URL.createObjectURL(new Blob([body], { type }));
+  const url = URL.createObjectURL(body instanceof Blob ? body : new Blob([body], { type }));
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;

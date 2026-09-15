@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { collectLinkedInChat, toLinkedInMarkdown } from '../extension/core/linkedin-ui.js';
+import { collectLinkedInChat, createLinkedInZip, toLinkedInMarkdown } from '../extension/core/linkedin-ui.js';
 
 test('renders LinkedIn chat as readable Markdown with embedded attachment URLs', () => {
   const markdown = toLinkedInMarkdown({
@@ -55,4 +55,25 @@ test('captures a rendered LinkedIn GIF URL as an embeddable image attachment', (
   } finally {
     globalThis.location = previousLocation;
   }
+});
+
+test('creates a local LinkedIn archive with Markdown, JSON, report, and fetched assets', async () => {
+  const data = {
+    type: 'linkedin-chat',
+    exportedAt: '2026-07-31T12:00:00.000Z',
+    messages: [{
+      sender: 'Person One', timestamp: '2026-07-31T11:55:00.000Z', text: 'A message body',
+      attachments: [{ type: 'image', url: 'https://media.example.test/image.png', alt: 'Shared image' }],
+    }],
+  };
+  const archive = await createLinkedInZip(data, async () => ({
+    blob: new Blob(['image bytes'], { type: 'image/png' }),
+    type: 'image/png',
+  }));
+  assert.ok(archive instanceof Blob);
+  assert.equal(archive.type, 'application/zip');
+  assert.equal(archive.files.length, 4);
+  assert.deepEqual(archive.files.map((file) => file.name), [
+    'conversation.md', 'messages.json', 'export-report.json', 'assets/001-image.png',
+  ]);
 });

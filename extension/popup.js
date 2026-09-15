@@ -169,4 +169,6 @@ async function configurePopup() {
   previewButton.hidden = true;
   bulkExportButton.hidden = true;
   document.querySelector('#participant-labels').closest('fieldset').hidden = true;
+  document.querySelector('#linkedin-zip-format').hidden = false;
+  document.querySelector('#linkedin-zip-format input').checked = true;
 }

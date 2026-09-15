@@ -14,6 +14,7 @@ function installMenus() {
     chrome.contextMenus.create({ id: LINKEDIN_MENU_ROOT, title: 'Export LinkedIn page', contexts: ['page'], documentUrlPatterns: ['https://www.linkedin.com/*'] });
     chrome.contextMenus.create({ id: `${LINKEDIN_MENU_ROOT}-json`, parentId: LINKEDIN_MENU_ROOT, title: 'Profile or chat as JSON', contexts: ['page'], documentUrlPatterns: ['https://www.linkedin.com/*'] });
     chrome.contextMenus.create({ id: `${LINKEDIN_MENU_ROOT}-markdown`, parentId: LINKEDIN_MENU_ROOT, title: 'Profile or chat as Markdown', contexts: ['page'], documentUrlPatterns: ['https://www.linkedin.com/*'] });
+    chrome.contextMenus.create({ id: `${LINKEDIN_MENU_ROOT}-zip`, parentId: LINKEDIN_MENU_ROOT, title: 'Chat with attachments as ZIP', contexts: ['page'], documentUrlPatterns: ['https://www.linkedin.com/*'] });
     installingMenus = false;
   });
 }
@@ -22,7 +23,7 @@ chrome.runtime.onInstalled.addListener(installMenus);
 chrome.runtime.onStartup.addListener(installMenus);
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  const linkedInFormat = info.menuItemId === `${LINKEDIN_MENU_ROOT}-json` ? 'json' : info.menuItemId === `${LINKEDIN_MENU_ROOT}-markdown` ? 'markdown' : null;
+  const linkedInFormat = info.menuItemId === `${LINKEDIN_MENU_ROOT}-json` ? 'json' : info.menuItemId === `${LINKEDIN_MENU_ROOT}-markdown` ? 'markdown' : info.menuItemId === `${LINKEDIN_MENU_ROOT}-zip` ? 'zip' : null;
   if (linkedInFormat && tab?.id) {
     exportLinkedInAcrossFrames(tab.id, linkedInFormat).catch(() => {});
     return;
